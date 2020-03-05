@@ -1,5 +1,5 @@
 # Dissertation
-**Title:** Use of aggregated covariates in propensity score analysis of clustered data
+**Title:** Use of aggregated covariates in propensity score analysis of clustered data\n
 **Author:** Kyle Nickodem
 
 Consider the increased presence of school resource officers (SROs) in American schools over the last 20 years. SROs are oft-armed law enforcement agents tasked with deterring misbehavior and increasing the students’ and staffs’ sense of safety in order to create a school environment conducive for learning.
