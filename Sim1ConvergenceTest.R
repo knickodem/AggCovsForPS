@@ -14,10 +14,10 @@ LogitToProb <- function(logit){
 #### Defining Conditions ####
 
 ## Study Conditions
-DataGenConds <- crossing(nsub = c(20, 60, 100),           # number of subjects per cluster
+DataGenConds <- crossing(nsub = c(20),           # number of subjects per cluster; Subjects was irrelevant to convergence
                          nclus = c(20, 30, 40, 50, 60),          # number of clusters
-                         icc = c(.2),    #.05, .1,        # intraclass correlation [ICC(1)] for outcome, Y, and reflective L2 aggregations
-                         aggvar = c(.1,.3),   #.5,1       # error/1-% sampled in observed L2 covariates
+                         icc = c(.05, .2),    #.05, .1,        # intraclass correlation [ICC(1)] for outcome, Y, and reflective L2 aggregations
+                         aggvar = c(.1, 1),   # .3, .5       # error/1-% sampled in observed L2 covariates
                          method = c("Formative.RE","Formative.Sample","Reflective.RE","Reflective.Sample"))   # data generation method
 
 nreps <- 100  # number of replications
@@ -29,20 +29,20 @@ nreps <- 100  # number of replications
 
 
 # ## Creating blank matrix for summary statistics for each data generation condition
-# DGSnames <- c("Prop_Z1","True_Logit","True_PS","Obs_Logit","Obs_PS",
+# DGSnamesCnvgTest <- c("Prop_Z1","True_Logit","True_PS","Obs_Logit","Obs_PS",
 #               "Logit_Bias","Logit_MAE","Logit_RMSE","PS_Bias","PS_MAE","PS_RMSE",
 #               "Y_ICC1","Y_Variance","L1_Variance","L1_Cor",
 #               "True_L2_Variance","True_L2_Cor","Obs_L2_Variance","Obs_L2_Cor",
 #               "True.Obs_L2_Cor", "X_ICC1","X_ICC2","Converged")
 
-DGSnames <- c("Prop_Z1","True_Logit","True_PS","Obs_Logit","Obs_PS","Converged")
-DGS <- matrix(-999, ncol = length(DGSnames) + ncol(DataGenConds), nrow = nrow(DataGenConds)) # Summary stats for generated datasets
+DGSnamesCnvgTest <- c("Prop_Z1","True_Logit","True_PS","Obs_Logit","Obs_PS","Convergence")
+DGS <- matrix(-999, ncol = length(DGSnamesCnvgTest) + ncol(DataGenConds), nrow = nrow(DataGenConds)) # Summary stats for generated datasets
 SampDatabyCond <- list()  # save sample data from first rep of each condition
 
 ## Variables consistent across all conditions
 delta <- .5 #c(.2, .5, .8),      # treatment effect size
 marg <- -1.0986                  # marginal probability of treatment;intercept of -1.0986 produces a marginal probability of .25; LogitToProb(-1.0986)
-L1names <- paste0("x",1:20)
+L1names <- paste0("x", 1:20)
 trueL2names <- paste(L1names[1:10], "c", sep = "_")
 obsL2names <- paste(trueL2names, "o", sep = "_")
 
@@ -64,7 +64,7 @@ for(con in 1:nrow(DataGenConds)){
   
   
   ## Stats for each data generation replication
-  DataGenRepStats <- matrix(-999,ncol = length(DGSnames), nrow = nreps)
+  DataGenRepStats <- matrix(-999,ncol = length(DGSnamesCnvgTest), nrow = nreps)
   
   ###################################################################
   #### Testing various ways of creating aggregated L2 covariates ####
@@ -141,7 +141,7 @@ for(con in 1:nrow(DataGenConds)){
         mutate(rij = rnorm(n = ntot, mean = 0, sd = sqrt(sigma2)))              # random L1 error for outcome model
       # inner_join(GenL1, by = "sid")
       
-    }else if(method == "Reflective.Sample"){
+    } else if(method == "Reflective.Sample"){
       
       #### V4: Generate true L2, generate L1 from L2, sample from L1 then aggregate observed L2 ####
       
@@ -201,36 +201,13 @@ for(con in 1:nrow(DataGenConds)){
     SampData$PS <- fitted(PS.mod)                           # observed PS 
     SampData$Logit <- predict(PS.mod)                       # observed logit of the PS
     SampData$TruePS <- LogitToProb(SampData$logitz1)        # true PS
-    SampData$LogitDiff <- SampData$Logit - SampData$logitz1 # Error in observed (estimated) and true logit of the PS
-    SampData$PSDiff <- SampData$PS - SampData$TruePS        # Error in observed and true PS
-    
-    # ## Calculating ICC(1) and (2)
-    # ICC1 <- purrr::map_dbl(paste0("x",1:10), ~ICC::ICCbareF(factor(cid), quo_name(.x), SampData)) # ICC(1) of aggregated covariates
-    # ICC2 <- (nsub*ICC1) / (1 + (nsub - 1)*ICC1)
-    
+
     #### Description of characteristics for each replication #### 
     DataGenRepStats[r,1] <- mean(SampData$z)                             # proportion with treatment exposure
     DataGenRepStats[r,2] <- mean(SampData$logitz1)                       # mean true logit of treatment exposure
     DataGenRepStats[r,3] <- mean(SampData$TruePS)                        # mean true probability of treatment exposure
     DataGenRepStats[r,4] <- mean(SampData$Logit)                         # mean observed logit of treatment exposure
     DataGenRepStats[r,5] <- mean(SampData$PS)                            # mean observed probability of treatment exposure
-    # DataGenRepStats[r,6] <- mean(SampData$LogitDiff)                            # bias of logit
-    # DataGenRepStats[r,7] <- mean(abs(SampData$LogitDiff))                       # mae of logit
-    # DataGenRepStats[r,8] <- sqrt(mean(SampData$LogitDiff^2))                    # rmsea of logit
-    # DataGenRepStats[r,9] <- mean(SampData$PSDiff)                               # bias of PS
-    # DataGenRepStats[r,10] <- mean(abs(SampData$PSDiff))                         # mae of PS
-    # DataGenRepStats[r,11] <- sqrt(mean(SampData$PSDiff^2))                      # rmsea of PS
-    # DataGenRepStats[r,12] <- ICC::ICCbareF(factor(cid), Yij, SampData)          # ICC(1) of outcome Yij
-    # DataGenRepStats[r,13] <- var(SampData$Yij)                                  # variance of the outcome
-    # DataGenRepStats[r,14] <- cov(SampData[,L1names]) %>% diag() %>% mean()              # mean variance of L1 covariates
-    # DataGenRepStats[r,15] <- cor(SampData[,L1names]) %>% .[lower.tri(.)] %>% mean()    # mean correlation of L1 covariates
-    # DataGenRepStats[r,16] <- cov(SampData[,trueL2names]) %>% diag() %>% mean()         # mean variance of true L2 covariates
-    # DataGenRepStats[r,17] <- cor(SampData[,trueL2names]) %>% .[lower.tri(.)] %>% mean() # mean correlation of true L2 covariates
-    # DataGenRepStats[r,18] <- cov(SampData[,obsL2names]) %>% diag() %>% mean()           # mean variance of observed L2 covariates
-    # DataGenRepStats[r,19] <- cor(SampData[,obsL2names]) %>% .[lower.tri(.)] %>% mean()  # mean correlation of observed L2 covariates
-    # DataGenRepStats[r,20] <- purrr::map2_dbl(.x = trueL2names,.y = obsL2names,~cor(SampData[,.x],SampData[,.y])) %>% mean() # correlation b/t true and observed L2 covariates
-    # DataGenRepStats[r,21] <- mean(ICC1)                                   # mean ICC(1) of L1 X covariates
-    # DataGenRepStats[r,22] <- mean(ICC2)                                   # mean ICC(2) of L2 X covariates
     DataGenRepStats[r,6] <- ifelse(PS.mod$converged == TRUE, 1, 0)       # Did the PS model converge?
     
     if(r == 1){
@@ -243,7 +220,7 @@ for(con in 1:nrow(DataGenConds)){
   toc(quiet = TRUE, log = TRUE)
   
   #### Sample characteristics averaged across replications ####
-  colnames(DataGenRepStats) <- DGSnames
+  colnames(DataGenRepStats) <- DGSnamesCnvgTest
   DataGenStats <- data.frame(DataGenRepStats) %>%
     summarize_all(mean, na.rm = TRUE) %>%
     bind_cols(DataGenConds[con, ])
@@ -258,28 +235,41 @@ for(con in 1:nrow(DataGenConds)){
 #######################################################
 
 colnames(DGS) <- colnames(DataGenStats)
-DGSbyCond <- data.frame(DGS, stringsAsFactors = FALSE) %>%
+DGSbyCondCnvgTest <- data.frame(DGS, stringsAsFactors = FALSE) %>%
   filter(nsub != -999) %>%                                     # Quality control check; should have all 432 rows after filtering, indicating all conditions were completed
-  mutate_at(vars(one_of(DGSnames)), as.numeric)                # Converting from character to numeric
+  mutate_at(vars(one_of(DGSnamesCnvgTest)), as.numeric)                # Converting from character to numeric
 # DGSbyCond %>% mutate_if(is.numeric,~round(.,2)) %>% View()
 
 ## Converting independent variables to factors
-DGSbyCond <- DGSbyCond %>%
+DGSbyCondCnvgTest <- DGSbyCondCnvgTest %>%
   mutate_at(vars(nsub:method), ~forcats::as_factor(.))
 
 ## Order independent variables (and interactions) for use in regressions or long formatted data
-ConditionVars <- c("nsub", "nclus", "aggvar", "method",
-                   "nsub:nclus", "nsub:aggvar", "nsub:method",
-                   "nclus:aggvar", "nclus:method",
-                   "aggvar:method")
+ConditionVarsCnvgTest <- c("nclus", "aggvar", "icc", "method",
+                   "nclus:aggvar","nclus:icc", "nclus:method",
+                   "aggvar:method","aggvar:icc", "icc:method")
 
-Converge.lm <- lm(as.formula(paste("Converged ~", paste(ConditionVars, collapse = " + "))), data = DGSbyCond)
-sjstats::omega_sq(Converge.lm, partial = TRUE, ci.lvl = .95)
+Converge.lm <- lm(as.formula(paste("Convergence ~", paste(ConditionVarsCnvgTest, collapse = " + "))), data = DGSbyCondCnvgTest)
+ConvergeOmegas <- sjstats::omega_sq(Converge.lm, partial = TRUE, ci.lvl = .95)
 
-ConvergedPlot <- DGSbyCond %>%
-  ggplot(aes(x = nclus, y = Converged, fill = method)) +
+
+ICCfacCnvgTest <- c(`.20` = "0.2", `.05` = "0.05")
+
+ConvergedPlot <- DGSbyCondCnvgTest %>%
+  mutate(ICC = fct_recode(icc, !!!ICCfacCnvgTest),
+         method = str_replace(method, "\\.", "-")) %>%
+  rename(Clusters = nclus) %>%
+  ggplot(aes(x = Clusters, y = Convergence, fill = method)) +
   geom_boxplot(notch = FALSE) +
-  theme_bw(base_size = 20) +
-  facet_wrap(~aggvar)
+  ylab("Convergence Rate") +
+  # scale_x_discrete(name = "Error SD (or Sampling Ratio)", labels = c(".1 (.9)",".3 (.7)", ".5 (.5)", "1 (.3)")) +
+  scale_fill_manual(name = "Procedure", values = c("#e66101","#fdb863","#5e3c99","#b2abd2")) +
+  # facet_grid(. ~ Clusters, labeller = label_both) +
+  theme_bw(base_size = 20)
 
-save.image(file = "Sim1ConvergenceTest.RData")
+ggsave(ConvergedPlot, file = "ConvergenceTest_BoxPlot.png", width = 10, height = 6)
+
+save(DataGenConds,SampDatabyCond,Con1DataGenRepStats,DGSbyCondCnvgTest,
+     ConditionVarsCnvgTest, Converge.lm, ConvergeOmegas,
+     ICCfacCnvgTest, ConvergedPlot,
+     file = "Sim1ConvergenceTest_Results.RData")
