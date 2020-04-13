@@ -40,9 +40,14 @@ DGSnames <- c("Prop_Z1","True_Logit","True_PS","Obs_Logit","Obs_PS",
               "Logit_Bias","Logit_MAE","Logit_RMSE","PS_Bias","PS_MAE","PS_RMSE",
               "Y_ICC1","Y_Variance","L1_Variance","L1_Cor",
               "True_L2_Variance","True_L2_Cor","Obs_L2_Variance","Obs_L2_Cor",
-              "True.Obs_L2_Cor", "X_ICC1","X_ICC2")
+              "True.Obs_L2_Cor", "X_ICC1","X_ICC2","Convergence")
 DGS <- matrix(-999, ncol = length(DGSnames) + ncol(DataGenConds), nrow = nrow(DataGenConds)) # Summary stats for generated datasets
 
+## Variables consistent across all conditions
+marg <- -1.0986                  # marginal probability of treatment;intercept of -1.0986 produces a marginal probability of .25; LogitToProb(-1.0986)
+L1names <- paste0("x", 1:20)
+trueL2names <- paste(L1names[1:10], "c", sep = "_")
+obsL2names <- paste(trueL2names, "o", sep = "_")
 
 #### Starting Generation ####
 set.seed(48226) # Seed for reproducing results
@@ -54,19 +59,15 @@ for(con in 1:nrow(DataGenConds)){
   nsub <- DataGenConds[con,][[1]]  # Number of Level 1 units (i.e., subjects)
   nclus <- DataGenConds[con,][[2]]  # Number of Level 2 units (i.e., clusters)
   ntot <- nclus*nsub                # Total sample size
-  delta <- DataGenConds[con,][[3]] # Average Treatment Effect ($\delta$)
   icc <- DataGenConds[con,][[4]]   # Intraclass correlation coefficient
   aggvar <- DataGenConds[con,][[5]]  # error for creating observed L2 covariates
   method <- DataGenConds[con,][[6]] # method for generating L1, true L2, and obs L2 covariates
   tau00 <- icc                     # between cluster (L2) variance ($\tau_{00}$)
   sigma2 <- 1 - tau00              # within cluster (L1) variance ($\sigma^2$)
-  marg <- -1.0986                  # marginal probability of treatment;intercept of -1.0986 produces a marginal probability of .25; LogitToProb(-1.0986)
-  L1names <- paste0("x",1:20)
-  trueL2names <- paste(L1names[1:10], "c", sep = "_")
-  obsL2names <- paste(trueL2names, "o", sep = "_")
+
   
   ## Stats for each data generation replication
-  DataGenRepStats <- matrix(-999,ncol = length(DGSnames), nrow = nreps)
+  DataGenRepStats <- matrix(-999, ncol = length(DGSnames), nrow = nreps)
   
   ###################################################################
   #### Testing various ways of creating aggregated L2 covariates ####
@@ -77,7 +78,7 @@ for(con in 1:nrow(DataGenConds)){
       #### V1: Generate L1, aggregate true L2, then add random error for observed L2 ####
       
       ## Level 1 covariates - 20 continuous covariates from a standard normal distribution with correlation of .2
-      GenData <- genCorData(n = ntot, mu = rep(0,20), sigma = sqrt(sigma2), rho = 0.2, corstr = "cs", 
+      GenData <- genCorData(n = ntot, mu = rep(0, 20), sigma = sqrt(sigma2), rho = 0.2, corstr = "cs",  # compound symmetry correlation structure based on sigma and rho
                             cnames = L1names, idname = "sid") %>%
         mutate(rij = rnorm(n = ntot, mean = 0, sd = sqrt(sigma2)),                   # random error for outcome model from normal distribution (i.e, $\mu$ = 0, $\sigma^2$ = 1)
                cid = as.character(rep(1:nclus, each = nsub))) %>%                    # creating cluster ID
@@ -94,7 +95,7 @@ for(con in 1:nrow(DataGenConds)){
       #### V2: Generate L1, aggregate true L2, sample from L1 and aggregate observed L2 ####
       
       ## Level 1 covariates - 20 continuous covariates from standard normal distribution with correlation of .2
-      GenL1 <- genCorData(n = ntot, mu = rep(0,20), sigma = sqrt(sigma2), rho = 0.2, corstr = "cs", 
+      GenL1 <- genCorData(n = ntot, mu = rep(0, 20), sigma = sqrt(sigma2), rho = 0.2, corstr = "cs", 
                          cnames = L1names, idname = "sid") %>%
         mutate(rij = rnorm(n = ntot, mean = 0, sd = sqrt(sigma2)),    # random error for outcome model from normal distribution (i.e, $\mu$ = 0, $\sigma^2$ = 1)
                cid = as.character(rep(1:nclus, each = nsub))) %>%     # creating cluster ID
@@ -143,7 +144,7 @@ for(con in 1:nrow(DataGenConds)){
         mutate(rij = rnorm(n = ntot, mean = 0, sd = sqrt(sigma2)))              # random L1 error for outcome model
         # inner_join(GenL1, by = "sid")
       
-    }else if(method == "Reflective.Sample"){
+    } else if(method == "Reflective.Sample"){
       
       #### V4: Generate true L2, generate L1 from L2, sample from L1 then aggregate observed L2 ####
       
@@ -193,7 +194,7 @@ for(con in 1:nrow(DataGenConds)){
              Yij = .5*x1 + .5*x2 + .5*x3 + .5*x4 + .5*x5 + .5*x6 + .5*x7 + .5*x8 + .5*x9 + .5*x10 +            # Generating outcome values
                .5*x11 + .5*x12 + .5*x13 + .5*x14 + .5*x15 + .5*x16 + .5*x17 + .5*x18 + .5*x19 + .5*x20 + rij + # Level 1 covariates
                .5*x1_c + .5*x2_c + .5*x3_c + .5*x4_c + .5*x5_c + 
-               .5*x6_c + .5*x7_c + .5*x8_c + .5*x9_c + .5*x10_c + delta*z + uj)                                # Level 2 covariates
+               .5*x6_c + .5*x7_c + .5*x8_c + .5*x9_c + .5*x10_c + .5*z + uj)                                # Level 2 covariates
     
     ## Estimating observed PS
     # need to investigate why some models do not converge, which then affects the bias and RMSE calculations; Not sure if this is actually a problem         
@@ -218,10 +219,10 @@ for(con in 1:nrow(DataGenConds)){
     DataGenRepStats[r,5] <- mean(SampData$PS)                            # mean observed probability of treatment exposure
     DataGenRepStats[r,6] <- mean(SampData$LogitDiff)                            # bias of logit
     DataGenRepStats[r,7] <- mean(abs(SampData$LogitDiff))                       # mae of logit
-    DataGenRepStats[r,8] <- sqrt(mean(SampData$LogitDiff^2))                    # rmsea of logit
+    DataGenRepStats[r,8] <- sqrt(mean(SampData$LogitDiff^2))                    # rmse of logit
     DataGenRepStats[r,9] <- mean(SampData$PSDiff)                               # bias of PS
     DataGenRepStats[r,10] <- mean(abs(SampData$PSDiff))                         # mae of PS
-    DataGenRepStats[r,11] <- sqrt(mean(SampData$PSDiff^2))                      # rmsea of PS
+    DataGenRepStats[r,11] <- sqrt(mean(SampData$PSDiff^2))                      # rmse of PS
     DataGenRepStats[r,12] <- ICC::ICCbareF(factor(cid), Yij, SampData)          # ICC(1) of outcome Yij
     DataGenRepStats[r,13] <- var(SampData$Yij)                                  # variance of the outcome
     DataGenRepStats[r,14] <- cov(SampData[,L1names]) %>% diag() %>% mean()              # mean variance of L1 covariates
@@ -233,10 +234,11 @@ for(con in 1:nrow(DataGenConds)){
     DataGenRepStats[r,20] <- purrr::map2_dbl(.x = trueL2names,.y = obsL2names,~cor(SampData[,.x],SampData[,.y])) %>% mean() # correlation b/t true and observed L2 covariates
     DataGenRepStats[r,21] <- mean(ICC1)                                   # mean ICC(1) of L1 X covariates
     DataGenRepStats[r,22] <- mean(ICC2)                                   # mean ICC(2) of L2 X covariates
+    DataGenRepStats[r,23] <- ifelse(PS.mod$converged == TRUE, 1, 0)       # Did the PS model converge?
     
   }
   
-  ## logging time to run replication
+  ## logging time to run condition
   toc(quiet = TRUE, log = TRUE)
   
   #### Sample characteristics averaged across replications ####
