@@ -226,12 +226,16 @@ for(con in 1:nrow(DataGenConds)){
     DataGenRepStats[r,12] <- ICC::ICCbareF(factor(cid), Yij, SampData)          # ICC(1) of outcome Yij
     DataGenRepStats[r,13] <- var(SampData$Yij)                                  # variance of the outcome
     DataGenRepStats[r,14] <- cov(SampData[,L1names]) %>% diag() %>% mean()              # mean variance of L1 covariates
-    DataGenRepStats[r,15] <- cor(SampData[,L1names]) %>% .[lower.tri(.)] %>% mean()    # mean correlation of L1 covariates
+    DataGenRepStats[r,15] <- cor(SampData[,L1names]) %>% .[lower.tri(.)] %>%    # mean correlation of L1 covariates
+      psych::fisherz() %>% mean() %>% psych::fisherz2r()
     DataGenRepStats[r,16] <- cov(SampData[,trueL2names]) %>% diag() %>% mean()         # mean variance of true L2 covariates
-    DataGenRepStats[r,17] <- cor(SampData[,trueL2names]) %>% .[lower.tri(.)] %>% mean() # mean correlation of true L2 covariates
+    DataGenRepStats[r,17] <- cor(SampData[,trueL2names]) %>% .[lower.tri(.)] %>%       # mean correlation of true L2 covariates
+      psych::fisherz() %>% mean() %>% psych::fisherz2r()
     DataGenRepStats[r,18] <- cov(SampData[,obsL2names]) %>% diag() %>% mean()           # mean variance of observed L2 covariates
-    DataGenRepStats[r,19] <- cor(SampData[,obsL2names]) %>% .[lower.tri(.)] %>% mean()  # mean correlation of observed L2 covariates
-    DataGenRepStats[r,20] <- purrr::map2_dbl(.x = trueL2names,.y = obsL2names,~cor(SampData[,.x],SampData[,.y])) %>% mean() # correlation b/t true and observed L2 covariates
+    DataGenRepStats[r,19] <- cor(SampData[,obsL2names]) %>% .[lower.tri(.)] %>%         # mean correlation of observed L2 covariates
+      psych::fisherz() %>% mean() %>% psych::fisherz2r()
+    DataGenRepStats[r,20] <- purrr::map2_dbl(.x = trueL2names,.y = obsL2names,~cor(SampData[,.x],SampData[,.y])) %>% # correlation b/t true and observed L2 covariates
+      psych::fisherz() %>% mean() %>% psych::fisherz2r()
     DataGenRepStats[r,21] <- mean(ICC1)                                   # mean ICC(1) of L1 X covariates
     DataGenRepStats[r,22] <- mean(ICC2)                                   # mean ICC(2) of L2 X covariates
     DataGenRepStats[r,23] <- ifelse(PS.mod$converged == TRUE, 1, 0)       # Did the PS model converge?

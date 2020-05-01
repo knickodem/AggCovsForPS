@@ -20,6 +20,8 @@ library(tidyr)
 #### Simulation Results ####
 # load("Sim1_10Reps.RData")
 load("Saved Sim1 Results/Sim1_ThousandRepswCnvg.RData") #~/Degree Progress/Prospectus and Dissertation/Dis Sim/
+load("Saved Sim1 Results/Sim1_ThousandRepsUpdate.RData")
+
 
 
 #### Creates QQ, fitted vs residual, and Cook's d ####
@@ -117,7 +119,7 @@ Get_Descriptives <- function(data, ContinuousVariable, ..., digits = 5, AllConti
 #### Defining Factors for analysis and presentation ####
 
 ## Converting independent variables to factors
-DGSbyCondwCnvg <- DGSbyCondwCnvg %>%
+DGSbyCondUpdate <- DGSbyCondUpdate %>%
   mutate_at(vars(nsub:method), ~as_factor(.))
 
 ## Order independent variables (and interactions) for use in regressions or long formatted data
@@ -162,7 +164,7 @@ TimesOmega <- sjstats::omega_sq(TheTimes, partial = TRUE, ci.lvl = .95) %>%
 #### In Sample Characteristics, then binding timing ####
 ## Regressions
 Thelms <- map(DGSnameswCnvg, ~lm(as.formula(paste(.x, "~", paste(ConditionVars, collapse = " + "))),
-                           data = DGSbyCondwCnvg)) %>%
+                           data = DGSbyCondUpdate)) %>%
   set_names(DGSnameswCnvg)
 TheAnovas <- map(Thelms,~anova(.x)) # I don't actually use this
 
@@ -238,7 +240,7 @@ VIFs <- car::vif(Thelms[[1]]) %>%
 Arrange_Omegas(`True-Obs L2 Cor`)
 
 ## Box Plot
-TrueObsCorbyMethodError_BoxPlot <- DGSbyCondwCnvg %>%
+TrueObsCorbyMethodError_BoxPlot <- DGSbyCondUpdate %>%
   mutate(method = str_replace(method, "\\.", "-")) %>%
   Plot_Shortcut(xv = "aggvar", yv = "True.Obs_L2_Cor", gpv = "method", linebox = "box") +
   scale_y_continuous(name = "True and Aggregated L2 Correlation", limits = c(0, 1), breaks = seq(0, 1, .2)) +
@@ -248,7 +250,7 @@ TrueObsCorbyMethodError_BoxPlot <- DGSbyCondwCnvg %>%
 
 ## Descriptives
 # Note: Create tables only if needed to report specific values in text, but not needed for display
-# psych::describeBy(DGSbyCondwCnvg$True.Obs_L2_Cor, list(DGSbyCondwCnvg$method, DGSbyCondwCnvg$aggvar), mat = TRUE, digits = 3) %>% View()
+# psych::describeBy(DGSbyCondUpdate$True.Obs_L2_Cor, list(DGSbyCondUpdate$method, DGSbyCondUpdate$aggvar), mat = TRUE, digits = 3) %>% View()
 
 
 
@@ -260,7 +262,7 @@ TrueObsCorbyMethodError_BoxPlot <- DGSbyCondwCnvg %>%
 ## Loess plot including all manipulated factors except number of clusters
 # Note: doing a boxplot isn't helpful because each box would only summarize 4 data points
 # I don't end up using this
-# TrueObsCor_LoessPlot <- DGSbyCondwCnvg %>%
+# TrueObsCor_LoessPlot <- DGSbyCondUpdate %>%
 #   mutate(ICC = fct_recode(icc, !!!ICCfac) %>% fct_rev(.)) %>%
 #   rename(Subjects = nsub) %>%
 #   Plot_Shortcut(xv = "aggvar", yv = "True.Obs_L2_Cor", gpv = "method", linebox = "line") +
@@ -279,7 +281,7 @@ TrueObsCorbyMethodError_BoxPlot <- DGSbyCondwCnvg %>%
 # proportion of subjects in treatment and control groups; and variance and ICC(1) of the subject-level outcome
 
 ## Sample Characteristic Values in Long Format
-DGSbyCond_Long <- DGSbyCondwCnvg %>%
+DGSbyCond_Long <- DGSbyCondUpdate %>%
   gather(Characteristic, Value,one_of(DGSnameswCnvg))
 
 #### ICCs ####
@@ -296,7 +298,7 @@ ExpectedICC2 <- crossing(nsub = c(20, 60, 100),           # number of subjects p
          nsub = factor(nsub),
          icc = factor(icc))
 # Final table
-ICC2Table <- DGSbyCondwCnvg %>%
+ICC2Table <- DGSbyCondUpdate %>%
   group_by(icc, nsub) %>%
   summarize(Median = median(X_ICC2),
             Min = min(X_ICC2),
@@ -335,6 +337,8 @@ YICC1_BoxPlot <- DGSbyCond_Long %>%
   xlab("ICC(1) Condition") +
   theme(strip.background = element_rect(colour = "black", fill = "white")) #legend.justification = c(0, 1), legend.position = c(.05, .95)
 
+psych::describeBy(DGSbyCondUpdate$Y_ICC1, list(DGSbyCondUpdate$method), mat = TRUE, digits = 3)
+
 #### Variances ####
 Arrange_Omegas(`Y Variance`)       # 100% Method and ICC, also subjects and clusters ; Expected to vary based on ICC (and clusters?)
 Arrange_Omegas(`L1 Variance`)      # Clusters and ICC                                ; Expected to vary by ICC, subjects and clusters?
@@ -342,8 +346,8 @@ Arrange_Omegas(`True L2 Variance`) # ~100% ICC, Method, and Subjects, also clust
 Arrange_Omegas(`Obs L2 Variance`)  # ~100% aggvar, Method, also ICC and subjects     ; Expected to vary by ICC and clusters
 
 ## Descriptives
-psych::describe(DGSbyCondwCnvg$Y_Variance)
-psych::describeBy(DGSbyCondwCnvg$True_L2_Variance, list(DGSbyCondwCnvg$icc), mat = TRUE, digits = 3) %>% View()
+psych::describe(DGSbyCondUpdate$Y_Variance)
+psych::describeBy(DGSbyCondUpdate$True_L2_Variance, list(DGSbyCondUpdate$icc), mat = TRUE, digits = 3) %>% View()
 
 ## Y
 YVariance_BoxPlot <- DGSbyCond_Long %>%
@@ -360,7 +364,7 @@ YVariance_BoxPlot <- DGSbyCond_Long %>%
 
 
 # ## True L2 variance
-TrueL2Var_Box <- DGSbyCondwCnvg %>%
+TrueL2Var_Box <- DGSbyCondUpdate %>%
   mutate(ICC = fct_recode(icc, !!!ICCfac)) %>%
   rename(Subjects = nsub) %>%
   Plot_Shortcut(xv = "Subjects", yv = "True_L2_Variance", gpv = "method", linebox = "box") +
@@ -382,7 +386,7 @@ TrueL2Var_Box <- DGSbyCondwCnvg %>%
 #   theme(strip.background = element_rect(colour = "black", fill = "white"), legend.position = "none")
 
 # ## Loess plot including all manipulated factors except number of clusters
-# ObsL2Var_LoessPlot <- DGSbyCondwCnvg %>%
+# ObsL2Var_LoessPlot <- DGSbyCondUpdate %>%
 #   mutate(ICC = fct_recode(icc, !!!ICCfac) %>% fct_rev(.)) %>%
 #   rename(Subjects = nsub) %>%
 #   Plot_Shortcut(xv = "aggvar", yv = "Obs_L2_Variance", gpv = "method", linebox = "line") +
@@ -400,7 +404,7 @@ Arrange_Omegas(`True L2 Cor`)      # Methods, subjects and ICC                  
 Arrange_Omegas(`Obs L2 Cor`)       # Method, aggvar, interact w/ ICC and subjects    ; Expected to be lower than .2 given the introduction of error
 
 ## Descriptives
-psych::describeBy(DGSbyCondwCnvg$L1_Cor, list(DGSbyCondwCnvg$method), mat = TRUE, digits = 4) %>% View()  
+psych::describeBy(DGSbyCondUpdate$L1_Cor, list(DGSbyCondUpdate$method), mat = TRUE, digits = 4) %>% View()  
 
 
 ## Prep
@@ -425,10 +429,10 @@ Corrs_LoessPlot <- CorrsPlotPrep %>%
 Arrange_Omegas(`Prop Z1`)          # ICC, Subjects, Method
 
 ## Descriptives
-psych::describeBy(DGSbyCondwCnvg$Prop_Z1, list(DGSbyCondwCnvg$method), mat = TRUE, digits = 4) %>% View()  
-median(DGSbyCondwCnvg$Prop_Z1)
+psych::describeBy(DGSbyCondUpdate$Prop_Z1, list(DGSbyCondUpdate$method), mat = TRUE, digits = 4) %>% View()  
+median(DGSbyCondUpdate$Prop_Z1)
 
-PropTreatBoxPlot  <- DGSbyCondwCnvg %>%
+PropTreatBoxPlot  <- DGSbyCondUpdate %>%
   mutate(ICC = fct_recode(icc, !!!ICCfac),
          method = str_replace(method, "\\.", "-")) %>%
   rename(Subjects = nsub) %>%
@@ -455,11 +459,11 @@ Arrange_Omegas(`PS RMSE`) # Clusters, aggvar, icc, method in that order
 
 #### True and Estimated PS ####
 ## Descriptives of true and estimated PS
-# psych::describeBy(DGSbyCondwCnvg$Obs_PS, list(round(DGSbyCondwCnvg$Prop_Z1,3)), mat = TRUE, digits = 3) %>% View()
-# psych::describeBy(DGSbyCondwCnvg$True_PS, list(round(DGSbyCondwCnvg$Prop_Z1,3)), mat = TRUE, digits = 3) %>% View()
-# psych::describe(DGSbyCondwCnvg$True_PS) #.30 - .38
+# psych::describeBy(DGSbyCondUpdate$Obs_PS, list(round(DGSbyCondUpdate$Prop_Z1,3)), mat = TRUE, digits = 3) %>% View()
+# psych::describeBy(DGSbyCondUpdate$True_PS, list(round(DGSbyCondUpdate$Prop_Z1,3)), mat = TRUE, digits = 3) %>% View()
+# psych::describe(DGSbyCondUpdate$True_PS) #.30 - .38
 
-# TrueEstPSbyPropZ_Plot <- DGSbyCondwCnvg %>%
+# TrueEstPSbyPropZ_Plot <- DGSbyCondUpdate %>%
 #   gather(Temp, Value, True_PS, Obs_PS) %>%
 #   mutate(PS = case_when(str_detect(Temp, "True") ~ "True",
 #                         str_detect(Temp, "Obs") ~ "Estimated")) %>%
@@ -484,23 +488,23 @@ Arrange_Omegas(`PS RMSE`) # Clusters, aggvar, icc, method in that order
 Arrange_Omegas(Convergence)
 
 ## Descriptives
-psych::describeBy(DGSbyCondwCnvg$Convergence, list(DGSbyCondwCnvg$nclus, DGSbyCondwCnvg$method), mat = TRUE, digits = 3) %>% View()
+psych::describeBy(DGSbyCondUpdate$Convergence, list(DGSbyCondUpdate$nclus), mat = TRUE, digits = 3) #, DGSbyCondUpdate$method
 
-ConvergedPlot <- DGSbyCondwCnvg %>%
+ConvergedPlot <- DGSbyCondUpdate %>%
   mutate(ICC = fct_recode(icc, !!!ICCfac),
          method = str_replace(method, "\\.", "-")) %>%
   rename(Clusters = nclus) %>%
   Plot_Shortcut(xv = "Clusters", yv = "Convergence", gpv = "method", linebox = "box") +
   ylab("Convergence Rate") +
-  # scale_x_discrete(name = "Error SD (or Sampling Ratio)", labels = c(".1 (.9)",".3 (.7)", ".5 (.5)", "1 (.3)")) +
   scale_fill_manual(name = "Procedure", values = c("#e66101","#fdb863","#5e3c99","#b2abd2"))
   # facet_grid(. ~ Clusters, labeller = label_both) +
-  theme(strip.background = element_rect(colour = "black", fill = "white"))
-  
-
+  # theme(strip.background = element_rect(colour = "black", fill = "white"))
 
 
 #### Bias ####
+## Descriptives
+psych::describeBy(DGSbyCondUpdate$Logit_Bias, list(DGSbyCondUpdate$nclus, DGSbyCondUpdate$method), mat = TRUE, digits = 3) %>% View() #, DGSbyCondUpdate$method
+  
 ## Bias Box Plot
 # PS
 BiasPS_BoxPlot <- DGSbyCond_Long %>%
@@ -533,10 +537,10 @@ Bias_BoxPlot <- cowplot::plot_grid(BiasPS_BoxPlot, BiasLogit_BoxPlot,
 
 
 
-#### MAE and RMSE Table ####
+#### Bias, MAE, and RMSE Table ####
 ## MAE and RMSE Median (Range) by ICC and Cluster
-# psych::describeBy(DGSbyCondwCnvg$PS_RMSE, list(DGSbyCondwCnvg$icc, DGSbyCondwCnvg$nclus), mat = TRUE, digits = 3) %>% View()
-# PSLogitDescrips <- DGSbyCondwCnvg %>%
+# psych::describeBy(DGSbyCondUpdate$PS_RMSE, list(DGSbyCondUpdate$icc, DGSbyCondUpdate$nclus), mat = TRUE, digits = 3) %>% View()
+# PSLogitDescrips <- DGSbyCondUpdate %>%
 #   select(ICC = icc, Clusters = nclus, contains("RMSE"), contains("MAE")) %>%
 #   gather(Temp, Value, -ICC, -Clusters) %>%
 #   separate(Temp, into = c("Measure", "Error"), sep = "_") %>%
@@ -548,6 +552,17 @@ Bias_BoxPlot <- cowplot::plot_grid(BiasPS_BoxPlot, BiasLogit_BoxPlot,
 #   gather(MdnRng, Value, Median, Range) %>%
 #   spread(ICCclus, Value) %>%
 #   arrange(Error, Measure)
+
+## Logit Bias, MAE, and RMSE Median (Range) by generation procedure for 100 clusters
+Logit100ClusterDescrips <- DGSbyCondUpdate %>%
+  filter(nclus == "100") %>%
+  select(Procedure = method, Logit_Bias, Logit_MAE, Logit_RMSE) %>%
+  gather(Temp, Value, -Procedure) %>%
+  mutate(Procedure = str_replace(Procedure, "\\.", "-"),
+         Temp = str_remove(Temp, "Logit_")) %>%
+  group_by(Procedure, Temp) %>%
+  summarize(Median = paste0(format(round(median(Value), 2), scientific = FALSE), " (", format(round(min(Value), 2), scientific = FALSE), " - ", format(round(max(Value), 2), scientific = FALSE), ")")) %>%
+  spread(Temp, Median)
 
 #### MAE and RMSE Plots ####
 ## MAE Box Plots
@@ -622,7 +637,7 @@ save(TheTimes, Thelms, TheOmegas, TheOmegas_Wide,
      YICC1_BoxPlot, YVariance_BoxPlot, PropTreatBoxPlot,
      BiasPS_BoxPlot, BiasLogit_BoxPlot, Bias_BoxPlot,
      MAEPS_BoxPlot, MAELogit_BoxPlot, RMSEPS_BoxPlot, RMSELogit_BoxPlot, MAERMSE_BoxPlot,
-     file = "Sim1_Thousand_SummaryResults.RData")
+     file = "Sim1_Thousand_SummaryResultsUpdate.RData")
 
 #### Exporting Model Check Plots ####
 map2(.x = Model_Check_Plots, .y = names(Model_Check_Plots),
