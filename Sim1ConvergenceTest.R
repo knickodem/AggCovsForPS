@@ -1,3 +1,10 @@
+#############################################################
+#                                                           #
+#   Simulation 1 follow up - Reasons for Non-Convergence    #
+#                                                           #
+#############################################################
+
+## Loading packages
 library(simstudy)
 library(tictoc)
 library(dplyr)
@@ -29,12 +36,6 @@ nreps <- 100  # number of replications
 
 
 # ## Creating blank matrix for summary statistics for each data generation condition
-# DGSnamesCnvgTest <- c("Prop_Z1","True_Logit","True_PS","Obs_Logit","Obs_PS",
-#               "Logit_Bias","Logit_MAE","Logit_RMSE","PS_Bias","PS_MAE","PS_RMSE",
-#               "Y_ICC1","Y_Variance","L1_Variance","L1_Cor",
-#               "True_L2_Variance","True_L2_Cor","Obs_L2_Variance","Obs_L2_Cor",
-#               "True.Obs_L2_Cor", "X_ICC1","X_ICC2","Converged")
-
 DGSnamesCnvgTest <- c("Prop_Z1","True_Logit","True_PS","Obs_Logit","Obs_PS","Convergence")
 DGS <- matrix(-999, ncol = length(DGSnamesCnvgTest) + ncol(DataGenConds), nrow = nrow(DataGenConds)) # Summary stats for generated datasets
 SampDatabyCond <- list()  # save sample data from first rep of each condition
@@ -42,9 +43,9 @@ SampDatabyCond <- list()  # save sample data from first rep of each condition
 ## Variables consistent across all conditions
 delta <- .5 #c(.2, .5, .8),      # treatment effect size
 marg <- -1.0986                  # marginal probability of treatment;intercept of -1.0986 produces a marginal probability of .25; LogitToProb(-1.0986)
-L1names <- paste0("x", 1:20)
-trueL2names <- paste(L1names[1:10], "c", sep = "_")
-obsL2names <- paste(trueL2names, "o", sep = "_")
+L1names <- paste0("x", 1:20)                         # names of L1 covariates
+trueL2names <- paste(L1names[1:10], "c", sep = "_")  # names of true L2 covariates
+obsL2names <- paste(trueL2names, "o", sep = "_")     # names of aggregated L2 covariates
 
 #### Starting Generation ####
 set.seed(48226) # Seed for reproducing results
@@ -65,9 +66,6 @@ for(con in 1:nrow(DataGenConds)){
   
   ## Stats for each data generation replication
   DataGenRepStats <- matrix(-999,ncol = length(DGSnamesCnvgTest), nrow = nreps)
-  
-  ###################################################################
-  #### Testing various ways of creating aggregated L2 covariates ####
   
   for(r in 1:nreps){
     
@@ -118,12 +116,7 @@ for(con in 1:nrow(DataGenConds)){
     } else if(method == "Reflective.RE"){
       
       #### V3: Generate true L2, generate L1 from L2, then aggregate observed L2 plus random error ####
-      
-      # ## Level 1 covariates - 10 continuous covariates from standard normal distribution with correlation of .2
-      # GenL1 <- genCorData(n = ntot, mu = rep(0,10), sigma = 1, rho = 0.2, corstr = "cs", 
-      #                    cnames = paste0("x",11:20), idname = "sid") %>%
-      #   mutate(rij = rnorm(n = ntot, mean = 0, sd = sqrt(sigma2)))              # random error for outcome model from standard normal distribution (i.e, $\mu$ = 0, $\sigma^2$ = 1)
-      
+    
       ## Level 2 covariates - continuous covariates from normal distribution with correlation of .2
       GenL2 <- genCorData(n = nclus, mu = rep(0,20), sigma = sqrt(tau00), rho = .2, corstr = "cs",
                           cnames = paste0(L1names, "_c"), idname = "cid") %>%    # trueL2names; Generate 20 L2 covariates to maintain correlation amongst all L1 instead of half being uncorrelated with the other
@@ -139,16 +132,10 @@ for(con in 1:nrow(DataGenConds)){
         mutate_at(vars(x1_c:x10_c), list(o = ~. + rnorm(1,mean = 0,sd = aggvar))) %>%          # Adding random variation to true cluster mean; selects a random number for each cluster for each covariate
         ungroup() %>%
         mutate(rij = rnorm(n = ntot, mean = 0, sd = sqrt(sigma2)))              # random L1 error for outcome model
-      # inner_join(GenL1, by = "sid")
       
     } else if(method == "Reflective.Sample"){
       
       #### V4: Generate true L2, generate L1 from L2, sample from L1 then aggregate observed L2 ####
-      
-      # ## Level 1 covariates - 10 continuous covariates from standard normal distribution with correlation of .2
-      # GenL1 <- genCorData(n = ntot, mu = rep(0,10), sigma = 1, rho = 0.2, corstr = "cs", 
-      #                    cnames = paste0("x",11:20), idname = "sid") %>%
-      #   mutate(rij = rnorm(n = ntot, mean = 0, sd = sqrt(sigma2)))              # random L1 error for outcome model
       
       ## Level 2 covariates - continuous covariates from standard normal distribution with correlation of .2
       GenL2 <- genCorData(n = nclus, mu = rep(0,20), sigma = sqrt(tau00), rho = .2, corstr = "cs",
@@ -238,7 +225,6 @@ colnames(DGS) <- colnames(DataGenStats)
 DGSbyCondCnvgTest <- data.frame(DGS, stringsAsFactors = FALSE) %>%
   filter(nsub != -999) %>%                                     # Quality control check; should have all 432 rows after filtering, indicating all conditions were completed
   mutate_at(vars(one_of(DGSnamesCnvgTest)), as.numeric)                # Converting from character to numeric
-# DGSbyCond %>% mutate_if(is.numeric,~round(.,2)) %>% View()
 
 ## Converting independent variables to factors
 DGSbyCondCnvgTest <- DGSbyCondCnvgTest %>%
@@ -252,7 +238,10 @@ ConditionVarsCnvgTest <- c("nclus", "aggvar", "icc", "method",
 Converge.lm <- lm(as.formula(paste("Convergence ~", paste(ConditionVarsCnvgTest, collapse = " + "))), data = DGSbyCondCnvgTest)
 ConvergeOmegas <- sjstats::omega_sq(Converge.lm, partial = TRUE, ci.lvl = .95)
 
+## descriptives by cluster and procedure
+psych::describeBy(DGSbyCondCnvgTest$Convergence, list(DGSbyCondCnvgTest$nclus, DGSbyCondCnvgTest$method), mat = TRUE, digits = 3) %>% View()
 
+## Plotting convergence rate
 ICCfacCnvgTest <- c(`.20` = "0.2", `.05` = "0.05")
 
 ConvergedPlot <- DGSbyCondCnvgTest %>%
@@ -262,9 +251,7 @@ ConvergedPlot <- DGSbyCondCnvgTest %>%
   ggplot(aes(x = Clusters, y = Convergence, fill = method)) +
   geom_boxplot(notch = FALSE) +
   ylab("Convergence Rate") +
-  # scale_x_discrete(name = "Error SD (or Sampling Ratio)", labels = c(".1 (.9)",".3 (.7)", ".5 (.5)", "1 (.3)")) +
   scale_fill_manual(name = "Procedure", values = c("#e66101","#fdb863","#5e3c99","#b2abd2")) +
-  # facet_grid(. ~ Clusters, labeller = label_both) +
   theme_bw(base_size = 20)
 
 ggsave(ConvergedPlot, file = "ConvergenceTest_BoxPlot.png", width = 10, height = 6)
@@ -273,3 +260,5 @@ save(DataGenConds,SampDatabyCond,Con1DataGenRepStats,DGSbyCondCnvgTest,
      ConditionVarsCnvgTest, Converge.lm, ConvergeOmegas,
      ICCfacCnvgTest, ConvergedPlot,
      file = "Sim1ConvergenceTest_Results.RData")
+
+load("Convergence Issue Simulations/Sim1ConvergenceTest_Results.RData")

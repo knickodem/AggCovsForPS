@@ -1,8 +1,9 @@
-################################################
-#                                              #
-#   Packages and Functions for Applied Study   #
-#                                              #
-################################################
+###############################
+#                             #
+#  SROs and Student Outcomes  #
+#    Packages and Functions   #
+#                             #
+###############################
 
 #### Packages ####
 library(haven)
@@ -12,84 +13,23 @@ library(stringr)
 library(purrr)
 library(forcats)
 library(MatchIt)
-library(WeightIt)
 library(cobalt)
 library(ggplot2)
 library(tictoc)
-library(mice)
 library(lme4)
+library(broom.mixed)
+library(mice)
 # library(micemd)
 # library(MatchIt.mice)
 
-
-
-###########################################
-#### Descriptive and Generic Functions ####
-
-#### Converting logits to probabilities and vice versa ####
-LogitToProb <- function(logit){
-  odds <- exp(logit)
-  prob <- odds / (1 + odds)
-  return(prob)
+## Shortcut for changing covariate names to version for tables and figures
+PrintableCovariatesShortcut <- function(vector){
+  vector %>% str_replace("p16.", "% ") %>% ifelse(str_detect(., "_Perc"), paste("%", .), .) %>%
+    str_remove("_Center") %>% str_remove("_Scaled") %>% str_remove("_Perc") %>%
+    str_replace_all("_", " ") %>%
+    str_replace_all("\\.", "/")
 }
 
-## Converting Probability to Logit
-ProbToLogit <- function(prob){
-  odds <- prob / (1 - prob)
-  logit <- log(odds)
-  return(logit)
-}
-
-#### Getting summary descriptives on a continuous variable ####
-## unquoted grouping variables should be specified in ...
-Get_Descriptives <- function(data,ContinuousVariable,...,digits=5,AllContinuous = FALSE){
-  
-  groups <- quos(...)
-  CV <- enquo(ContinuousVariable)
-  
-  data_descrip <- data %>% group_by(!!!groups) %>%
-    summarize(n = sum(!is.na(!!CV)),
-              Median = median(!!CV, na.rm=TRUE),
-              Mean = mean(!!CV, na.rm=TRUE),
-              SE = sd(!!CV, na.rm=TRUE)/sqrt(sum(!is.na(!!CV))),
-              SD = sd(!!CV, na.rm=TRUE),
-              Min = min(!!CV, na.rm=TRUE),
-              Max = max(!!CV, na.rm=TRUE)) %>% ungroup()
-  
-  if(AllContinuous==FALSE){
-    data_descrip <- data_descrip %>%
-      mutate(SE = ifelse(Min==0 & Max==1,(Mean*(1-Mean))/sqrt(n),SE),
-             SD = ifelse(Min==0 & Max==1,NA,SD))
-  }
-  
-  data_descrip <- data_descrip %>%
-    mutate_if(is.numeric,~round(.,digits=digits))
-  
-  return(data_descrip)
-}
-
-
-#### Balance Plots ####
-# balAllPlotGrey <- balAll %>% filter(!(Variable %in% c("distance"))) %>%
-#   mutate(Variable = factor(Variable,levels=rev(levels(balOrig$Variable)))) %>%
-#   rename(Sample=Model) %>%
-#   ggplot(aes(x=Variable,y=Std_Diff,group=Sample)) +
-#   geom_hline(yintercept = .1, linetype = 1, color = "gray5") +
-#   geom_point(aes(shape=Sample,color=Sample),size=4,position=position_dodge(1)) +
-#   ylab("Standardized Difference") + xlab("") +
-#   scale_shape_manual(values=c(19,18,17,15,7,3)) +
-#   scale_color_grey() +
-#   #scale_color_brewer(palette="Dark2") +
-#   coord_flip() +
-#   theme_bw(base_size = 20) +
-#   theme(panel.grid.major = element_line(color = "gray87"),
-#         panel.grid.minor = element_line(color = "gray90"),
-#         panel.background = element_rect(fill = "white", color = "black"),
-#         axis.text.x = element_text(color = "black"),
-#         axis.text.y = element_text(color = "black"),
-#         legend.justification=c(1,0),legend.position=c(.9,.1))
-# 
-# # ggsave(balAllPlotGrey, file = "Scripts/Saved Objects/balAllPlotGrey.png",height = 10, width = 15)
 
 #### Computing of correlation matrix ####
 ## adapted from http://www.sthda.com/english/wiki/correlation-matrix-an-r-function-to-do-all-you-need
@@ -191,16 +131,334 @@ rquery.cormat<-function(x,
   
 }
 
+####################################
+#### Propensity Score Functions ####
+
+#### Tailoring bal.tab output for my purposes ####
+# UnAdj refers to unadjusted differences vs adjusted (matched, weighted)
+Get_BalanceTable <- function(btab, UnAdj = c("Un","Adj"), renameUnAdj = NULL){
+  TheBT <- btab[[1]] %>%
+    tibble::rownames_to_column("Covariate") %>%
+    # mutate(Covariate = c(StudentCovNames, SchoolCovNames)) %>%
+    select(Covariate, Type ,ends_with(UnAdj), -starts_with("KS"),-contains("Threshold"))
+  
+  if(!is.null(renameUnAdj)){
+    TheBT <- TheBT %>%
+      rename_all(~str_replace(., UnAdj, renameUnAdj))
+  }
+  return(TheBT)
+}
+
+#### Calculate Cohen's D from two independent or paired groups ####
+## SD can be pooled by providing sd1 and sd2
+Get_CohensD <- function(m1,m2,sd1,sd2=NULL,n1,n2,sample="ind",proportion=FALSE){
+  
+  
+  # raw mean difference
+  md <- (m1 - m2)
+  
+  # Sigma for continuous variables
+  if(proportion==FALSE){
+    
+    # Use only SD from group 1 or an overall SD
+    if(is.null(sd2)){
+      
+      sigma <- sd1
+      
+    } else {
+      
+      # sigma for independent groups
+      if(sample=="ind"){
+        
+        sigmanum <- (n1 - 1) * (sd1^2) + (n2 - 1) * (sd2^2)
+        sigmadenom <- (n1 + n2 - 2)
+        sigma <- sqrt(sigmanum/sigmadenom)
+        
+      } else{ 
+        
+        # sigma for paired groups
+        sigma <- sqrt((sd1^2 + sd2^2) / 2)
+        
+      }
+    }
+    # Sigma for dichotomous variables
+  } else {
+    
+    # Can provide overall proportion to sd2
+    if(!is.null(sd2)){
+      
+      sigma <- sqrt(sd2 * (1 - sd2)/ n1)
+      
+    } else if(sample=="ind"){
+      
+      # for unequal independent groups 
+      sigma <- sqrt((m1 * (1 - m1) / n1) + (m2 * (1 - m2) / n2))
+      
+    } else {
+      
+      # for paired groups or groups of equal size
+      sigma <- sqrt((m1 * (1 - m1) + m2 * (1 - m2)) / 2)
+      
+    }
+  }
+  
+  # Calculating d
+  d <- md/sigma
+  
+  return(d)
+}
+
+#### Getting summary descriptives on a continuous variable ####
+## unquoted grouping variables should be specified in ...
+# requires semTools for skew and kurtosis
+Get_Descriptives <- function(data,ContinuousVariable,...,digits=5,AllContinuous=TRUE){
+  
+  groups <- quos(...)
+  CV <- enquo(ContinuousVariable)
+  
+  data_descrip <- data %>% group_by(!!!groups) %>%
+    summarize(n = sum(!is.na(!!CV)),
+              Median = median(!!CV, na.rm=TRUE),
+              Mean = mean(!!CV, na.rm=TRUE),
+              SE = sd(!!CV, na.rm=TRUE)/sqrt(sum(!is.na(!!CV))),
+              SD = sd(!!CV, na.rm=TRUE),
+              Min = min(!!CV, na.rm=TRUE),
+              Max = max(!!CV, na.rm=TRUE)) %>% ungroup()
+  
+  if(AllContinuous==FALSE){
+    
+    data_descrip <- data_descrip %>%
+      mutate(SE = ifelse(Min==0 & Max==1,(Mean*(1-Mean))/sqrt(n),SE),
+             SD = ifelse(Min==0 & Max==1,NA,SD))
+  }
+  
+  data_descrip <- data_descrip %>%
+    mutate_if(is.numeric,~round(.,digits=digits))
+  
+  return(data_descrip)
+}
+
+#### cobalt can't handle missing values so need to do comparison manually ####
+# Requires Get_Descriptives and Get_CohensD
+# Binary column indicating missingness must be called "Missing"
+# Using SRO instead of Missing I confirmed that this code functions equivalently to bal.tab
+Compare_Missing_Shortcut <- function(data,VarsToCompare, AllCont = FALSE){
+  
+  MissDescrips <- data %>%
+    select(Missing,one_of(VarsToCompare)) %>%
+    gather(Variable, Value, -Missing) %>%
+    Get_Descriptives(Value, Missing, Variable, AllContinuous = AllCont) # Compare Means using absolute standardized difference
+  
+  DescripswMissing <- MissDescrips %>% filter(Missing == 0) %>% select(-Missing) %>%
+    left_join(MissDescrips %>% filter(Missing == 1) %>% select(-Missing),by = "Variable", suffix = c("_Comp","_Miss")) %>%
+    left_join(data %>% select(one_of(VarsToCompare)) %>%                                      # Descriptives across all observations
+                gather(Variable, Value) %>%
+                Get_Descriptives(Value, Variable, AllContinuous = AllCont), by = "Variable") %>%
+    mutate(Std_Diff = ifelse(is.na(SD), Get_CohensD(m1 = Mean_Comp, m2 = Mean_Miss, sample = "paired", proportion = TRUE),
+                             Get_CohensD(m1 = Mean_Comp, m2 = Mean_Miss, sd1 = SD_Comp, sd2 = SD_Miss, n1 = n_Comp, n2 = n_Miss)),
+           Var_Ratio = SD_Comp / SD_Miss,
+           Variable = factor(Variable,levels = c(VarsToCompare))) %>%
+    select(Variable,starts_with("n"), starts_with("Mean"), starts_with("SD"), Std_Diff,Var_Ratio)
+  
+  return(DescripswMissing)
+}
 
 
-#################################################################
-
+####################################################
 
 
 #######################################
 #### Multilevel Modeling Functions ####
 
+#### Creates QQ, fitted vs residual, and fitted vs observed plots ####
+ModelCheckPlots <- function(model,
+                            glm.predict = "response", glm.resid = "deviance",
+                            smooth_method = "loess", ...){
+  
+  library(ggplot2)
+  
+  ## Collects output list
+  MCPlots <- list(QQ = NULL,
+                  L2_QQ = NULL,
+                  Fitted_and_Residual_Values = NULL,
+                  Residual_Correlation = NULL,
+                  Cooks_Distance = NULL,
+                  ROC_Curve = NULL)
+  
+  ## Extracting residuals
+  if("lm" %in% class(model)){
+    
+    ## Dependent variable name
+    DV <- names(model$model)[[1]]
+    
+    ## fit information
+    aug <- broom::augment(model, type.predict = glm.predict, type.residuals = glm.resid) #glm. arguments ignored for lm objects
+    
+    
+  } else if(grepl("merMod", class(model))){
+    
+    ## Dependent variable name
+    DV <- names(model@frame)[[1]]
+    
+    ## Level 1 fit information
+    aug <- broom.mixed::augment(model, type.predict = glm.predict, type.residuals = glm.resid) #glm. arguments ignored for lmer objects
+    
+    ## Level 2 information and plots
+    clusternm <- names(model@cnms)[[1]]
+    L2aug <- broom.mixed::augment(lme4::ranef(model))
+    L1L2 <- dplyr::left_join(dplyr::rename(aug, level = all_of(clusternm)), L2aug, by = "level")
+    
+    ## L1 and L2 Residual Correlation
+    L1L2corr <- ggplot(L1L2, aes(x = estimate, y = .resid)) +
+      geom_hline(aes(yintercept = 0), color = "grey", size = 1, linetype = 1) +
+      geom_point(shape = 1) +
+      geom_smooth(method = smooth_method, ...) +
+      labs(x = "Level 2 Residual", y = "Level 1 Residual") +
+      theme_bw()
+    
+    # Storing plot in output object
+    MCPlots[["Residual_Correlation"]] <- L1L2corr
+    
+  } else {stop("model must be of class 'lm', 'glm', or '(g)lmerMod'")}
+  
+  ## Adding id column
+  aug <- tibble::rowid_to_column(aug, ".id")
+  
+  ## Cook's d
+  cookplot <- ggplot(aug, aes(x = .id, y = .cooksd)) +
+    geom_bar(stat = "identity", position = "identity") +
+    labs(x = "Observation", y = "Cook's distance") +
+    theme_bw()
+  
+  # Storing plot in output object
+  MCPlots[["Cooks_Distance"]] <- cookplot
+  
+  
+  
+  if("glm" %in% class(model) | class(model) == "glmerMod"){
+    
+    ## Fitted vs. Residuals grouped by DV
+    aug[[DV]] <- factor(aug[[DV]]) 
+    
+    binned <- ggplot(aug, aes(x = .id, y = .resid)) + 
+      geom_hline(aes(yintercept = 0), color = "grey", size = 1, linetype = 1) +
+      geom_point(aes_string(color = DV)) +
+      geom_smooth(aes_string(color = DV), ...) +
+      labs(x = "Observation", y = paste(tools::toTitleCase(glm.resid), "Residual")) +
+      theme_bw()
+    
+    ## ROC Analysis
+    rocit <- pROC::roc(response = aug[[DV]], predictor = aug[[".fitted"]]) # glm.predict muste be "response"
+    
+    # Extracting ROC Results
+    AUC <- round(rocit$auc[[1]], 3)
+    senspec <- data.frame(Sensitivity = rocit$sensitivities,
+                          Specificity = rocit$specificities)
+    
+    rocplot <- ggplot(senspec, aes(x = Specificity, y = Sensitivity)) + 
+      geom_abline(slope = 1, intercept = 1, colour = "grey", size = 1) +
+      geom_line(size = 1.5, color = "black") +
+      scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, .2)) +
+      scale_x_reverse(limits = c(1, 0), breaks = seq(1, 0, -.2)) +
+      annotate(geom = "text", x = .3, y = .2, label = paste("AUC =", AUC)) +
+      theme_bw()
+    
+    
+    # Storing plots in output object
+    MCPlots[["Fitted_and_Residual_Values"]] <- binned
+    MCPlots[["ROC_Curve"]] <- rocplot
+    
+  } else if(class(model) == "lm" | class(model) == "lmerMod"){
+    
+    ## Q-Q Plot
+    qq <- ggplot(aug, aes(sample = .resid)) +  ## standardizing doesn't change the shape of the distribution so it doesn't matter of .resid or .std.resid
+      stat_qq(shape = 1) + stat_qq_line() +
+      labs(x = "Theoretical Quantiles", y = "Residual") +
+      theme_bw()
+    
+    ## Fitted vs. Residuals Plot
+    frplot <- ggplot(aug, aes(x = .fitted, y = .resid)) +
+      geom_hline(aes(yintercept = 0), color = "grey", size = 1, linetype = 1) +
+      geom_point(shape = 1) +
+      geom_smooth(method = smooth_method, ...) +
+      labs(x = "Fitted", y = "Residual") +
+      theme_bw()
+    
+    # Storing plots in output object
+    MCPlots[["QQ"]] <- qq
+    MCPlots[["Fitted_and_Residual_Values"]] <- frplot
+    
+  }
+  
+  if(class(model) == "lmerMod"){
+    
+    ## Q-Q Plot of L2 residuals
+    L2qq <- ggplot(L2aug, aes(sample = estimate)) +  
+      stat_qq(shape = 1) + stat_qq_line() +
+      labs(x = "Theoretical Quantiles", y = "Level 2 Residual") +
+      theme_bw()
+    
+    # Storing plot in output object
+    MCPlots[["L2_QQ"]] <- L2qq
+    
+  }
+  
+  ## Removing NULL list elements 
+  MCPlots <- MCPlots[lengths(MCPlots) != 0]
+  
+  return(MCPlots)
+  
+}
+
+#### Variance Inflation Factor of single or multilevel model put into a dataframe ####
+vif.table <- function (fit, modelname, multilevel = FALSE, digs = 3) {
+  
+  if(multilevel==TRUE){
+    # Taken from here: https://jonlefcheck.net/2012/12/28/dealing-with-multicollinearity-using-variance-inflation-factors/,
+    # which itself was adapted from rms::vif
+    
+    v <- vcov(fit)
+    nam <- names(fixef(fit))
+    
+    ## exclude intercepts
+    ns <- sum(1 * (nam == "Intercept" | nam == "(Intercept)"))
+    if (ns > 0) {
+      v <- v[-(1:ns), -(1:ns), drop = FALSE]
+      nam <- nam[-(1:ns)]
+    }
+    
+    d <- diag(v)^0.5
+    v <- diag(solve(v/(d %o% d)))
+    names(v) <- nam
+    v
+  } else{
+    # v <- car::vif(fit)
+  }
+  
+  v <- v  %>% as.data.frame() %>%
+    tibble::rownames_to_column("Predictor") %>%
+    mutate_if(is.numeric, ~round(., digits = digs))
+  names(v) <- c("Predictor", modelname)
+  
+  return(v)
+}
+
+#### R2 ####
+# produces the same as broom.mixed::tidy(., effects = "ran_pars", scales = "vcov"); uses formulas from Lorah (2018)
+HLM_R2 <- function(unc.model, model){
+  
+  vc.unc <- VarCorr(unc.model)
+  vc.mod <- VarCorr(model)
+  
+  R2 <- 1 - ((attr(vc.mod,"sc")^2 + vc.mod[[1]][[1]]) / (attr(vc.unc,"sc")^2 + vc.unc[[1]][[1]]))
+  
+  return(R2)
+  
+}
+
+
 #### Calculate ICC from lmer or glmer object ####
+# check performance::icc
 Get_ICC <- function(model, type = c("1","2","DE"), logistic = FALSE){
   
   vc <- VarCorr(model)
@@ -230,37 +488,6 @@ Get_ICC <- function(model, type = c("1","2","DE"), logistic = FALSE){
 }
 
 
-#### Variance Inflation Factor of single or multilevel model put into a dataframe ####
-vif.table <- function (fit, modelname, multilevel = FALSE, digs = 3) {
-  
-  if(multilevel==TRUE){
-    ## adapted from rms::vif
-    
-    v <- vcov(fit)
-    nam <- names(fixef(fit))
-    
-    ## exclude intercepts
-    ns <- sum(1 * (nam == "Intercept" | nam == "(Intercept)"))
-    if (ns > 0) {
-      v <- v[-(1:ns), -(1:ns), drop = FALSE]
-      nam <- nam[-(1:ns)]
-    }
-    
-    d <- diag(v)^0.5
-    v <- diag(solve(v/(d %o% d)))
-    names(v) <- nam
-    v
-  } else{
-    v <- car::vif(fit)
-  }
-  
-  v <- v  %>% as.data.frame() %>%
-    tibble::rownames_to_column("Predictor") %>%
-    mutate_if(is.numeric, ~round(., digits = digs))
-  names(v) <- c("Predictor", modelname)
-  
-  return(v)
-}
 
 
 #### Extracting fixed effects from single or multilevel, linear or logistic models
@@ -338,218 +565,22 @@ Get_Fixed <- function(model,modelname,multilevel=FALSE,logistic=c("binary","mult
   
 }
 
-
-#### Creates QQ, fitted vs residual, and fitted vs observed plots ####
-## works for lm, lmer, glm, glmer (I think)
-## does not work yet for multivariate, but could
-# Consider adding an option for using cowplot::plot_grid rather than saving as a list
-ModelCheckPlots <- function(model, smoother = "loess",
-                            observed = NULL, multinomial = FALSE, byImp = FALSE){
+#### Calculating f2 for SRO fixed effect ####
+Get_f2 <- function(SFit, outcome, sample){
   
+  UNCmod <- "~ 1 + (1|level2)"
+  Covmod <- paste0(" ~ 1 + ", paste(HLMvars[!(HLMvars %in% ExcludeCovs)], collapse = " + "), " + (1|level2)")
   
-  if(multinomial == TRUE){
-    
-    Residual <- resid(model) %>% data.frame() %>%
-      tibble::rownames_to_column("ID") %>% gather(Level, Residuals, -ID)
-    
-    FR <- fitted(model) %>% data.frame() %>%
-      tibble::rownames_to_column("ID") %>% gather(Level, Fitted, -ID) %>%
-      left_join(Residual, by = c("ID", "Level"))
-    
-  } else {
-    
-    FR <- data.frame(Fitted = fitted(model),
-                     Residuals = resid(model)) %>%
-      tibble::rownames_to_column("ID")
-  }
+  UFit <- lmer(as.formula(paste(outcome, UNCmod)), data =  FinalSamp16wPS[FinalSamp16wPS[[sample]] != 0, ])
+  CFit <- lmer(as.formula(paste(outcome, Covmod)), data =  FinalSamp16wPS[FinalSamp16wPS[[sample]] != 0, ])
   
-  ## QQ Plot - appears I no longer need to do the calculation manually with the addition of stat_qq_line()
-  # y <- quantile(FR$Residuals[!is.na(FR$Residuals)], c(0.25, 0.75))
-  # x <- qnorm(c(0.25, 0.75))
-  # slope <- diff(y)/diff(x)
-  # int <- y[1L] - slope * x[1L]
+  SR2 <- HLM_R2(UFit, SFit)
+  CR2 <- HLM_R2(UFit, CFit)
+  f2 <- ((SR2 - CR2) / (1 - SR2))
   
-  qq <- ggplot(FR, aes(sample = Residuals)) +
-    stat_qq(shape = 1) + stat_qq_line() +
-    labs(x = "Theoretical", y = "Observed") +
-    theme_bw(base_size = 18) #+geom_abline(slope = slope, intercept = int, color="black")
-  
-  ## Fitted vs. Residuals Plot
-  frplot <- FR %>%
-    ggplot(aes(x = Fitted, y = Residuals)) +
-    geom_point(shape = 1) +
-    geom_hline(aes(yintercept = 0), color = "grey", size = 1, linetype = 1) +
-    geom_smooth(method = smoother, se = FALSE, color = "black", size = 2, linetype = 1) +
-    theme_bw(base_size = 18)
-  
-  if(multinomial==TRUE){
-    qq <- qq + facet_wrap(~Level)
-    frplot <- frplot + facet_wrap(~Level)
-  }
-  
-  if(byImp==TRUE){
-    qq <- qq + facet_wrap(~`.imp`,ncol=2) + theme(strip.background = element_blank())
-    frplot <- frplot + facet_wrap(~`.imp`,ncol=2) + theme(strip.background = element_blank())
-  }
-  
-  MCPlots <- list(QQPlot = qq,
-                  FittedResidualPlot = frplot)
-  
-  
-  if(!is.null(observed)){
-    ## Fitted vs. Observed Plot
-    afplot <- FR %>%
-      ggplot(aes(x=Fitted,y=Observed)) +
-      geom_point(shape=1) +
-      geom_smooth(method="lm",se=FALSE,color="black",size=2,linetype=1) +
-      theme_bw(base_size = 18)
-    
-    if(multinomial==TRUE){
-      afplot <- afplot + facet_wrap(~Level)
-    }
-    
-    if(byImp==TRUE){
-      afplot <- afplot + facet_wrap(~`.imp`,ncol=2) + theme(strip.background = element_blank())
-    }
-    
-    MCPlots <- list(QQPlot = qq,
-                    FittedResidualPlot = frplot,
-                    ActualFittedPlot = afplot)
-  }
-  
-  if(class(model)=="lmerMod"){
-    
-    ## QQ Plot
-    L2res <- data.frame(Residuals = ranef(model)[[1]][[1]])
-    L2qq <- ggplot(L2res, aes(sample = Residuals)) +
-      stat_qq(shape=1) + stat_qq_line() +
-      labs(x = "Theoretical", y = "Observed") +
-      theme_bw(base_size = 18)
-    
-    MCPlots <- list(QQPlot = qq,
-                    L2QQPlot = L2qq,
-                    FittedResidualPlot = frplot)
-  }
-  
-  return(MCPlots)
+  f2df <- data.frame(Sample = sample, Outcome = outcome, C_R2 = CR2, S_R2 = SR2, f2 = f2)
+  return(f2df)
 }
 
 ###################################################
 
-
-####################################
-#### Propensity Score Functions ####
-
-#### Tailoring bal.tab output for my purposes ####
-# UnAdj refers to unadjusted differences vs adjusted (matched, weighted)
-Get_BalanceTable <- function(btab,UnAdj=c("Un","Adj"),replace01 = NULL, ModName=NULL){
-  
-  TheBT <- btab[[1]] %>%
-    tibble::rownames_to_column("Variable") %>%
-    select(Variable,Type,ends_with(UnAdj),-starts_with("KS"),-contains("Threshold"))
-  names(TheBT) <- str_remove(names(TheBT),UnAdj) %>%
-    str_remove(.,"\\.$")
-  
-  # Replace 0 and 1 values in column names with in 2 element character vector
-  if(!is.null(replace01)){
-    
-    names(TheBT) <- str_replace(names(TheBT),".0",replace01[[1]]) %>%
-      str_replace(.,".1",replace01[[2]])
-    
-  }
-
-  if(!is.null(ModName)){
-  TheBT <- TheBT %>%
-    mutate(Model = ModName) %>%
-    select(Model,everything())
-  }
-  
-  return(TheBT)
-}
-
-#### Calculate Cohen's D from two independent or paired groups ####
-## SD can be pooled by providing sd1 and sd2
-Get_CohensD <- function(m1,m2,sd1,sd2=NULL,n1,n2,sample="ind",proportion=FALSE){
-  
-  
-  # raw mean difference
-  md <- (m1 - m2)
-  
-  # Sigma for continuous variables
-  if(proportion==FALSE){
-    
-    # Use only SD from group 1 or an overall SD
-    if(is.null(sd2)){
-      
-      sigma <- sd1
-      
-    } else {
-      
-      # sigma for independent groups
-      if(sample=="ind"){
-        
-        sigmanum <- (n1 - 1) * (sd1^2) + (n2 - 1) * (sd2^2)
-        sigmadenom <- (n1 + n2 - 2)
-        sigma <- sqrt(sigmanum/sigmadenom)
-        
-      } else{ 
-        
-        # sigma for paired groups
-        sigma <- sqrt((sd1^2 + sd2^2) / 2)
-        
-      }
-    }
-    # Sigma for dichotomous variables
-  } else {
-    
-    # Can provide overall proportion to sd2
-    if(!is.null(sd2)){
-      
-      sigma <- sqrt(sd2 * (1 - sd2)/ n1)
-      
-    } else if(sample=="ind"){
-      
-      # for unequal independent groups 
-      sigma <- sqrt((m1 * (1 - m1) / n1) + (m2 * (1 - m2) / n2))
-      
-    } else {
-      
-      # for paired groups or groups of equal size
-      sigma <- sqrt((m1 * (1 - m1) + m2 * (1 - m2)) / 2)
-      
-    }
-  }
-  
-  # Calculating d
-  d <- md/sigma
-  
-  return(d)
-}
-
-#### cobalt can't handle missing values so need to do comparison manually ####
-# Requires Get_Descriptives and Get_CohensD
-# Binary column indicating missingness must be called "Missing"
-# Using SRO instead of Missing I confirmed that this code functions equivalently to bal.tab
-Compare_Missing_Shortcut <- function(data,VarsToCompare, AllCont = FALSE){
-  
-  MissDescrips <- data %>%
-    select(Missing,one_of(VarsToCompare)) %>%
-    gather(Variable, Value, -Missing) %>%
-    Get_Descriptives(Value, Missing, Variable, AllContinuous = AllCont) # Compare Means using absolute standardized difference
-  
-  DescripswMissing <- MissDescrips %>% filter(Missing == 0) %>% select(-Missing) %>%
-    left_join(MissDescrips %>% filter(Missing == 1) %>% select(-Missing),by = "Variable", suffix = c("_Comp","_Miss")) %>%
-    left_join(data %>% select(one_of(VarsToCompare)) %>%                                      # Descriptives across all observations
-                gather(Variable, Value) %>%
-                Get_Descriptives(Value, Variable, AllContinuous = AllCont), by = "Variable") %>%
-    mutate(Std_Diff = ifelse(is.na(SD), Mean_Comp - Mean_Miss,
-                             Get_CohensD(m1 = Mean_Comp, m2 = Mean_Miss, sd1 = SD)),
-           Var_Ratio = SD_Comp / SD_Miss,
-           Variable = factor(Variable,levels=c(VarsToCompare))) %>%
-    select(Variable,starts_with("n"),starts_with("Mean"),starts_with("SD"),Std_Diff,Var_Ratio)
-  
-  return(DescripswMissing)
-}
-
-
-############################################

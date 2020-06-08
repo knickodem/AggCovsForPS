@@ -1,67 +1,114 @@
-###################################################
-#                                                 #
-#       PS Matching for Applied Study             #
-#                                                 #
-###################################################
+#########################################
+#                                       #
+#       SROs and Student Outcomes       #
+#       Propensity Score Matching       #
+#                                       #
+#########################################
 
 ## Loading packages, functions, and cleaned dataset
 source("Applied_PF.R")
 load("Saved Applied Results/CompleteData.RData")
 
+## Recoding covariate names for figures and tables
+StudentCovsRecode <- c(FRL = "Free/Reduced Priced Lunch", College = "College Aspiration",
+                       Gambling = "Gambled", Vandalism = "Vandalized", Theft = "Stole", Diet = "Eat Produce",
+                       Family.Community_Support_Center = "Family/Community Support", Trauma1 = "Experienced Trauma")
+SchoolCovsRecode <- c(Total_Students10_Scaled = "Total Students", Fifth_L2 = "Elementary", Eighth_L2 = "Middle School",
+                      HS_L2= "High School", Charter_Magnet = "Charter/Magnet", TC = "Urban",
+                      p16.FRL = "% Free/Reduced Priced Lunch", p16.SPED = "% Special Education", p16.ELL = "% English Language Learner",
+                      College_Perc = "% College Aspiration", Proficient_Read = "% Proficient - Reading", Proficient_Math = "% Proficient - Math",
+                      Gambling_Perc = "% Gambled", Vandalism_Perc = "% Vandalized", Theft_Perc = "% Stole",
+                      Trauma1_Perc = "% Experienced Trauma", Diet_Perc = "% Eat Produce",
+                      Prop_FTE_Absent = "Teacher Absences", Student_Teacher_Ratio_Scaled = "Student/Teacher Ratio", Guards = "Security Guard",
+                      Positive_Identity_Perc_Center = "School Positive Identity", Social_Competence_Perc_Center = "School Social Competence",
+                      Family.Community_Support_Perc_Center = "School Family/Community Support")
 
-#######################
-####  Descriptives ####
-
-#### Descriptives at the Student-level ####
-## Includes school characteristics - Aligns with WWC standards (p. 25) - Actually I'm not entirely sure this is what WWC implies
-## Across all schools
-DescripsAtL1 <- FinalSample %>%
-  select(studentnumber, level2, one_of(StudentCovNames), SRO, one_of(SchoolCovNames)) %>%
-  gather(Variable, Value, -studentnumber, -level2) %>%
-  Get_Descriptives(Value, Variable, AllContinuous = FALSE)
-
-## By SRO status
-balance.CompL1 <- bal.tab(formula = f.build("SRO", c(StudentCovNames, SchoolCovNames)),
-                          data = FinalSample,
-                          continuous = "std", binary = "std", s.d.denom = "all",
-                          abs = TRUE, disp.v.ratio = TRUE)
-balCompL1 <- Get_BalanceTable(balance.CompL1, "Un", replace01 = c("_No_SRO", "_SRO"), ModName = "Original")
-#mutate(Variable = fct_reorder(as_factor(Variable),Std_Diff,.desc=TRUE))
+OutcomeFacOrder <- PrintableCovariatesShortcut(OutcomeVars)
+SampleFacOrder <- c("Full","SL","CL")
+StudentFacOrder <- recode(StudentCovNames, !!!StudentCovsRecode) %>%
+  PrintableCovariatesShortcut()
+SchoolFacOrder <- recode(SchoolCovNames, !!!SchoolCovsRecode) %>%
+  PrintableCovariatesShortcut()
 
 
-#### Descriptives at the School-level ####
-## Only includes school characteristics
-# Values differ from those calculated at the student level because the number of students per school is unequal.
-DescripsAtL2 <- CompleteSamp16L2Only %>%
-  select(level2, SRO, one_of(SchoolCovNames)) %>%
-  gather(Variable, Value, -level2) %>%
-  Get_Descriptives(Value, Variable, AllContinuous = TRUE)
+###############################
+#### Baseline Descriptives ####
 
-## By SRO status
-balance.CompL2 <- bal.tab(formula = f.build("SRO",SchoolCovNames),
-                           data = CompleteSamp16L2Only,
-                          continuous = "std", binary = "std", s.d.denom="all",
-                          abs = TRUE, disp.v.ratio = TRUE)
-balCompL2 <- Get_BalanceTable(balance.CompL2, "Un", replace01 = c("_No_SRO", "_SRO"), ModName = "Original")
-         #mutate(Variable = fct_reorder(as_factor(Variable),Std_Diff,.desc=TRUE))
+#### Student Level ####
+# Note: Getting the baseline descriptives in the original scale rather than the centered and standardized scales used latter
+# Check if unadjusted Diff is the same for centered/scaled. If different, then use the latter to be comparable with the PS models
+# Slightly, so I'll only keep the descriptives here
+## All Covariates by SRO exposure
+BaselineStudentDescrips <- bal.tab(formula = f.build("SRO", c(StudentPSVarNames, SchoolPSVarNames)),
+                                   data = FinalSample,
+                                   continuous = "std", binary = "std", s.d.denom = "pooled",
+                                   abs = TRUE, un = TRUE,
+                                   disp.means = TRUE, disp.sd = TRUE, disp.v.ratio = FALSE) %>%
+  Get_BalanceTable("Un", "Full") %>%
+  mutate(Covariate = recode(Covariate, Positive_Identity_Perc = "School Positive Identity", Social_Competence_Perc = "School Social Competence",
+                            Family.Community_Support_Perc = "School Family/Community Support", Student_Teacher_Ratio = "Student/Teacher Ratio") %>%
+           recode(., !!!SchoolCovsRecode) %>%
+           recode(., !!!StudentCovsRecode) %>%
+           PrintableCovariatesShortcut() %>%
+           str_remove("10") %>% as_factor()) %>%
+  select(-Diff.Full, -V.Ratio.Full) %>%
+  mutate_if(is.numeric, ~ifelse(Covariate == "Total Students", .*10, .) %>%
+              round(., 2))
+## Total + by SRO
+BaselineStudentDescripsTotal <- FinalSample %>%
+  select(studentnumber, level2, SRO, one_of(StudentPSVarNames), one_of(SchoolPSVarNames)) %>%
+  gather(Covariate, Value, -studentnumber, -level2) %>%
+  Get_Descriptives(Value, Covariate, digits = 6, AllContinuous = TRUE) %>%
+  mutate(Covariate = recode(Covariate, Positive_Identity_Perc = "School Positive Identity", Social_Competence_Perc = "School Social Competence",
+                            Family.Community_Support_Perc = "School Family/Community Support", Student_Teacher_Ratio = "Student/Teacher Ratio") %>%
+           recode(., !!!SchoolCovsRecode) %>%
+           recode(., !!!StudentCovsRecode) %>%
+           PrintableCovariatesShortcut() %>%
+           str_remove("10")) %>%
+  mutate_if(is.numeric, ~ifelse(Covariate == "Total Students", .*10, .) %>%
+              round(., 2)) %>%
+  left_join(BaselineStudentDescrips, by = "Covariate") %>%
+  mutate(Total = ifelse(Type == "Binary" | is.na(Type), as.character(Mean * 100), paste0(Mean, " (", SD, ")")),
+         SRO = ifelse(Type == "Binary" | is.na(Type), as.character(M.1.Full * 100), paste0(M.1.Full, " (", SD.1.Full, ")")),
+         No_SRO = ifelse(Type == "Binary" | is.na(Type), as.character(M.0.Full * 100), paste0(M.0.Full, " (", SD.0.Full, ")")),
+         Covariate = factor(Covariate, levels = c("SRO", StudentFacOrder, SchoolFacOrder)))
+  
 
-#################################################
+#### School Level #### 
+## Only school covariates by SRO exposure
+BaselineSchoolDescrips <- bal.tab(formula = f.build("SRO", c(SchoolPSVarNames)),
+                                        data = CompleteSamp16L2Only,
+                                        continuous = "std", binary = "std", s.d.denom = "pooled",
+                                        abs = TRUE, un = TRUE,
+                                        disp.means = TRUE, disp.sd = TRUE, disp.v.ratio = TRUE) %>%
+  Get_BalanceTable("Un", "Baseline") %>%
+  mutate(Covariate = recode(Covariate, Positive_Identity_Perc = "School Positive Identity", Social_Competence_Perc = "School Social Competence",
+                            Family.Community_Support_Perc = "School Family/Community Support", Student_Teacher_Ratio = "Student/Teacher Ratio") %>%
+           recode(., !!!SchoolCovsRecode) %>%
+           PrintableCovariatesShortcut() %>%
+           str_remove("10") %>% as_factor()) %>%
+  mutate_at(vars(M.0.Baseline:SD.1.Baseline), ~ifelse(Covariate == "Total Students", .*10, .) %>%
+              round(., 2))
 
+################################################
+  
 ###########################
 #### Aggregate Quality ####
 
 # Aggregate values included responses from students with missing data and from grade 5 students
 
 #### ICCs and Sampling Ratio ####
-## Calculate ICC(1) and ICC(2) for each agg covariate
+## Intercept only multilevel model for each agg covariate
 ICCMods <- map(str_remove_all(StudentCovNames, "_Center"), ~lmer(as.formula(paste0(.x," ~ 1 + (1|level2)")), data = FinalSample)) %>%
   set_names(str_remove_all(StudentCovNames, "_Center"))
+
+## Calculate ICC(1) and ICC(2) for each agg covariate
 ICC12 <- map_df(ICCMods, ~Get_ICC(.x, type = "1")) %>% mutate(Type = "ICC(1)") %>%     # Extracting ICC(1) from each model
   bind_rows(map_df(ICCMods, ~Get_ICC(.x, type = "2")) %>% mutate(Type = "ICC(2)")) %>% # Extracting ICC(2) from each model
   gather(Variable, Value, -Type)
 
 ## Calculating sampling ratio by school on each covariate, then averaging
-SamplingRatio <- SL16no5 %>%
+SamplingRatio <- SL16no5 %>%                                         # Using dataset with missing data because
   select(level2, TotalEnrollment16, Total_Enrollment = mss_sample,   # mde reported size & mss sample size for each school
          one_of(paste0(str_remove_all(StudentCovNames, "_Center"),"_n"))) %>%                   # n's for each student covariate
   filter(level2 %in% FinalSample$level2) %>%                         # only keeping schools in FinalSample
@@ -119,7 +166,6 @@ AggTrueCorrs <- CompareOCRMDEMSS %>% select(Total_Enrollment = mss_sample, MDE =
   mutate(row = str_remove(row,"_Perc")) %>%
   select(Variable = row,column,cor)
 
-
 #### Combined Table ####
 AggQualityTable <- ICC12 %>%
   bind_rows(SamplingRatio) %>%
@@ -129,8 +175,13 @@ AggQualityTable <- ICC12 %>%
   mutate(Variable = str_replace_all(Variable,"_"," ") %>%
            str_replace(.,"\\.","-"))
 
+## Correlations between MDE and CRDC
+MDECRDCcor <- c(SPED = cor(SL16no5$Prop_Enrollment_IDEA, SL16no5$p16.SPED, use = "pairwise.complete.obs"),
+                ELL = cor(SL16no5$Prop_Enrollment_LEP, SL16no5$p16.ELL, use = "pairwise.complete.obs"))
+
 #### Initial Descriptives and Quality of Aggregated Covariates ####
-save(DescripsAtL1, DescripsAtL2, balCompL1, ICCMods, AggQualityTable,
+save(BaselineStudentDescripsTotal, BaselineSchoolDescrips,
+     CompareOCRMDEMSS, ICCMods, AggQualityTable, MDECRDCcor,
      file = "Saved Applied Results/Descrips_and_AggQuality.RData")
   
 ##############################################################################
@@ -141,7 +192,7 @@ save(DescripsAtL1, DescripsAtL2, balCompL1, ICCMods, AggQualityTable,
 
 #### Prep ####
 ## Inversing Treatment and Control Designation
-# Since SRO (treatment) > Not_SRO, this allows for more SRO units to be retained, thus increasing overall sample size
+# Since SRO (treatment) > Not_SRO, this allows for more SRO units to be retained, thus increasing overall sample size (only matters if doing 1:many matching)
 FinalSample <- FinalSample %>%
   mutate(Not_SRO = ifelse(SRO == 1, 0, 1))
 CompleteSamp16L2Only <- CompleteSamp16L2Only %>%
@@ -157,310 +208,259 @@ tic()
 CLPSModel <- f.build("SRO",SchoolCovNames[!(SchoolCovNames %in% ExcludeCovs)])
 CLSRO.Mod <- glm(CLPSModel, family = binomial("logit"),
                  data = CompleteSamp16L2Only)
-toc() #7.75 sec when using FinalSample; .5 sec when using CompleteSamp16L2Only?
-# summary(CLSRO.Mod)
-# car::vif(CLSRO.Mod) # High for PIO, SC, and FCS; does this matter though? Does only balance matter?
+toc()
 
-## Not SRO
-NotCLPSModel <- f.build("Not_SRO",SchoolCovNames[!(SchoolCovNames %in% ExcludeCovs)])
-NotCLSRO.Mod <- glm(NotCLPSModel, family = binomial("logit"),
-                 data = CompleteSamp16L2Only)
 
-#### Ignore Cluster with Subject Level Treatment ####
-## Not SRO
+#### Subject Level Treatment ####
+## SRO
 tic()
-ICPSModel <- f.build("SRO",c(StudentCovNames[!(StudentCovNames %in% ExcludeCovs)],
+SLPSModel <- f.build("SRO",c(StudentCovNames[!(StudentCovNames %in% ExcludeCovs)],
                                  SchoolCovNames[!(SchoolCovNames %in% ExcludeCovs)]))
-ICSRO.Mod <- glm(as.formula(ICPSModel), family = binomial("logit"),
+SLSRO.Mod <- glm(as.formula(SLPSModel), family = binomial("logit"),
                  data = FinalSample)
 toc() #13.2 sec
-# summary(ICSRO.Mod)
-# car::vif(ICSRO.Mod) # some high numbers for L2 vars (same as CL model)
-
-## Not SRO
-NotICPSModel <- f.build("Not_SRO",c(StudentCovNames[!(StudentCovNames %in% ExcludeCovs)],
-                                    SchoolCovNames[!(SchoolCovNames %in% ExcludeCovs)]))
-NotICSRO.Mod <- glm(as.formula(NotICPSModel), family = binomial("logit"),
-                 data = FinalSample)
-
-# #### I'm starting suspect these will never work
-# ## Fixed Effects with Subject Level Treatment
-# tic()
-# FESRO.Mod <- glm(as.formula(paste0(StudentPSModel," + factor(level2)")), family = binomial("logit"),
-#                  data = FinalSample)
-# toc() # 1231.9 sec and model did not converge
-# # summary(FESRO.Mod)
-# # car::vif(FESRO.Mod) # 
-# 
-# 
-# ## Random Effects with Subject Level Treatment
-# tic()
-# RESRO.Mod <- glmer(as.formula(paste(ICPSModel, "+ (1|level2)")),
-#                    family = binomial("logit"), control = glmerControl(optimizer = "bobyqa"), 
-#                    data = FinalSample)
-# toc() # sec
-# summary(RESRO.Mod)
-# car::vif(RESRO.Mod) # 
-# 
-# tt <- getME(FESRO.Mod,"theta")
-# ll <- getME(FESRO.Mod,"lower")
-# min(tt[ll==0])
-
 
 #### Adding Propensity Scores to dataset and Save Results ####
 CompleteSamp16L2OnlywPS <- CompleteSamp16L2Only %>%
   mutate(Logit_CL = predict(CLSRO.Mod),
-         PS_CL = fitted(CLSRO.Mod),
-         Logit_NotCL = predict(NotCLSRO.Mod),
-         PS_NotCL = fitted(NotCLSRO.Mod))
+         PS_CL = fitted(CLSRO.Mod))
 FinalSamp16wPS <- FinalSample %>%
-  mutate(Logit_IC = predict(ICSRO.Mod),
-         PS_IC = fitted(ICSRO.Mod),
-         Logit_NotIC = predict(NotICSRO.Mod),
-         PS_NotIC = fitted(NotICSRO.Mod),
-         # Logit_FE = predict(FESRO.Mod),
-         # PS_FE = fitted(FESRO.Mod),
-         # Logit_RE = predict(RESRO.Mod),
-         # PS_RE = fitted(RESRO.Mod)
-         ) %>%
-  left_join(CompleteSamp16L2OnlywPS %>% select(level2, Logit_CL, PS_CL, Logit_NotCL, PS_NotCL), by = "level2")
+  mutate(Logit_SL = predict(SLSRO.Mod),
+         PS_SL = fitted(SLSRO.Mod)) %>%
+  left_join(CompleteSamp16L2OnlywPS %>% select(level2, Logit_CL, PS_CL), by = "level2")
 
 ## Distribution of PS
+psych::describeBy(FinalSamp16wPS$PS_SL, list(FinalSamp16wPS$SRO), mat = TRUE, digits = 4)
+psych::describeBy(FinalSamp16wPS$PS_CL, list(FinalSamp16wPS$SRO), mat = TRUE, digits = 4)
+max(FinalSamp16wPS$Logit_SL)
+max(FinalSamp16wPS$Logit_CL)
+
+# Used for my own sake, not necessarily for the manuscript
 PSDistributionPlot <- FinalSamp16wPS %>%
   select(studentnumber, level2, SRO, starts_with("PS_")) %>%
   gather(Sample, PS, starts_with("PS")) %>%
   mutate(Sample = str_remove(Sample, "PS_"),
-         Condition = case_when(SRO == 1 ~ "Has SRO",
-                               SRO == 0 ~ "No SRO") %>%
+         Condition = case_when(SRO == 1 ~ "Yes",
+                               SRO == 0 ~ "No") %>%
            as_factor()) %>%
   ggplot(aes(x = PS, fill = Condition)) +
   geom_density(alpha = 0.4) +
-  # geom_vline(data = PlotMeans, aes(xintercept = Mean, color = Retained), size = 2) +
-  # scale_x_continuous(breaks = seq(0,21,3)) +
-  scale_fill_manual(values = c("#3C3C3C","#5E0000")) +
-  # scale_color_manual(values = c("#3C3C3C","#5E0000")) +
-  theme_classic(base_size = 20) +
-  # theme(legend.justification = c(1,1), legend.position = c(.95,.95)) +
-  facet_wrap(~Sample)
+  scale_fill_manual(name = "SRO", values = c("#e66101", "#5e3c99")) +  #c("#3C3C3C","#5E0000")
+  theme_bw(base_size = 20) +
+  facet_wrap(~Sample) +
+  theme(strip.background = element_rect(colour = "black", fill = "white"))
 
 ## Exporting plot
 ggsave(PSDistributionPlot, file = "PSDistributionPlot.png", width = 10, height = 5)
 
-## Saving results
-save(ExcludeCovs, CLPSModel, ICPSModel, NotCLPSModel, NotICPSModel,
-     CLSRO.Mod, ICSRO.Mod, NotCLSRO.Mod, NotICSRO.Mod,#FESRO.Mod, RESRO.Mod, StudentPSModel,
-     FinalSamp16wPS, CompleteSamp16L2OnlywPS, PSDistributionPlot,
-     file = "Saved Applied Results/PSModels.RData")
-
-
 ###################################
 
-##################
-#### Matching ####
+############################
+#### Conditioning on PS ####
 
 #### Running Matching Algorithm ####
-
 ## Cluster Level - matching schools
-# SRO
 Match.CL <- matchit(as.formula(CLPSModel), data = CompleteSamp16L2OnlywPS,
                     method = "nearest", replace = FALSE, caliper = .2, distance = CompleteSamp16L2OnlywPS$Logit_CL)
-# Not SRO
-NotMatch.CL <- matchit(as.formula(NotCLPSModel), data = CompleteSamp16L2OnlywPS,
-                    ratio = 2, method = "nearest", replace = FALSE, caliper = .2, distance = CompleteSamp16L2OnlywPS$Logit_NotCL)
 
-## Subject Level - matching students (ignoring clusters)
-# SRO
+## Subject Level - matching students
 tic()
-Match.IC <- matchit(as.formula(ICPSModel), data = FinalSamp16wPS,
-                    method = "nearest", replace = FALSE, caliper = .2, distance = FinalSamp16wPS$Logit_IC)
-toc() # 1020 sec
-# Not SRO
-tic()
-NotMatch.IC <- matchit(as.formula(NotICPSModel), data = FinalSamp16wPS,
-                       ratio = 2, method = "nearest", replace = FALSE, caliper = .2, distance = FinalSamp16wPS$Logit_NotIC)
-toc() # 394 sec
+Match.SL <- matchit(as.formula(SLPSModel), data = FinalSamp16wPS,
+                    method = "nearest", replace = FALSE, caliper = .2, distance = FinalSamp16wPS$Logit_SL)
+toc() # 756 - 1020 sec
 
-
-# # Fixed effects model
-# Match.FE <- matchit(as.formula(NotICPSModel), data = FinalSamp16wPS,
-#                     method = "nearest", replace = FALSE, caliper = .2, distance = FinalSamp16wPS$Logit_FE)
-# 
-# # Random effects model
-# Match.RE <- matchit(as.formula(ICPSModel), data = FinalSamp16wPS,   # Model is ignored since distance is provided
-#                     method = "nearest", replace = FALSE, caliper = .2, distance = FinalSamp16wPS$Logit_RE)
-
+#### Weighting ####
+## Cluster Level
+Weight.CL <- WeightIt::get_w_from_ps(ps = CompleteSamp16L2OnlywPS$PS_CL, estimand = "ATE",
+                        treat = CompleteSamp16L2OnlywPS$SRO, treated = 1)
+## Subject Level
+Weight.SL <- WeightIt::get_w_from_ps(ps = FinalSamp16wPS$PS_SL, estimand = "ATE",
+                                     treat = FinalSamp16wPS$SRO, treated = 1)
 
 #### Adding Indicator to dataset ####
 # Cluster level
 CompleteSamp16L2OnlywPS <- CompleteSamp16L2OnlywPS %>%
-  mutate(CL_1to1 = Match.CL$weights,
-         CL_1to2 = NotMatch.CL$weights)
+  mutate(CL_match = Match.CL$weights,
+         CL_weight = Weight.CL)
 # Subject level, then adding cluster info
 FinalSamp16wPS <- FinalSamp16wPS %>%
-  mutate(IC_1to1 = Match.IC$weights,
-         IC_1to2 = NotMatch.IC$weights
-         # Matched_FE = Match.FE$weights,
-         # Matched_RE = Match.RE$weights
-         ) %>%
-  left_join(CompleteSamp16L2OnlywPS %>% select(level2, CL_1to1, CL_1to2), by = "level2")
-
-## Student
-table(FinalSamp16wPS$SRO,FinalSamp16wPS$IC_1to1) # Retains an extra (69398 - 15209) = 54189 treatment students
-table(FinalSamp16wPS$IC_1to1,FinalSamp16wPS$IC_1to2 != 0) # Retains an extra (69398 - 15209) = 54189 treatment students
-
-## School
-table(CompleteSamp16L2OnlywPS$Not_SRO, CompleteSamp16L2OnlywPS$CL_1to2) # Retains an extra (166 - 114) = 52 treatment schools
-table(CompleteSamp16L2OnlywPS$CL_1to1, CompleteSamp16L2OnlywPS$CL_1to2 != 0) # although same number of control schools retained (114), they werent the same ones
-
+  mutate(SL_match = Match.SL$weights,
+         SL_weight = Weight.SL) %>%
+  left_join(CompleteSamp16L2OnlywPS %>% select(level2, CL_match, CL_weight), by = "level2")
 
 #### Saving Matches ####
-save(FinalSamp16wPS, CompleteSamp16L2OnlywPS,
-     Match.CL, Match.IC, NotMatch.CL, NotMatch.IC, #Match.FE,Match.RE,
-     file = "Saved Applied Results/Matches.RData")
+save(StudentCovNames, StudentCovsRecode, StudentFacOrder,            # Covariate Names
+     SchoolCovNames, SchoolCovsRecode, SchoolFacOrder,
+     ExcludeCovs, OutcomeVars, OutcomeFacOrder, SampleFacOrder,      # Outcome names
+     CLPSModel, SLPSModel, CLSRO.Mod, SLSRO.Mod, PSDistributionPlot, # PS model
+     Match.CL, Match.SL, Weight.CL, Weight.SL,                       # Conditioning methods
+     FinalSamp16wPS, CompleteSamp16L2OnlywPS,                        # Datasets
+     file = "Saved Applied Results/PSModels_and_Matches.RData")
 
 ##########################################
 
 ###########################
 #### Assessing Balance ####
 
-# load("Saved Applied Results/PSModels.RData")
-load("Saved Applied Results/Matches.RData")
+load("Saved Applied Results/PSModels_and_Matches.RData")
+load("Saved Applied Results/Descrips_and_AggQuality.RData")
 
+### Outcome Descriptives and Effect Size Difference ####
+## Provides the standardized difference without adjusting for covariates
+OutcomeBalance <- map(.x = c("CL_match", "SL_match"),
+                      ~bal.tab(formula = f.build("SRO",c(OutcomeVars)),
+                               data = FinalSamp16wPS,
+                               continuous = "std", binary = "std", s.d.denom = "pooled",
+                               abs = FALSE, un = TRUE,
+                               disp.means = TRUE, disp.sd = TRUE, disp.v.ratio = FALSE,
+                               weights = FinalSamp16wPS[[.x]], method = "matching")) %>%
+  set_names(c("CL", "SL"))
 
-#### Standardized Mean Differences ####
-# Calculating standardized mean difference for each of the matching methods
-# "pooled" uses the standard deviation from the two groups from the full, unadjusted sample
-# baltab uses weights from MatchIt object
+## Cleaning up table for presentation
+OutcomeBalanceTable <- Get_BalanceTable(OutcomeBalance$SL, UnAdj = "Un", renameUnAdj = "X") %>% mutate(Sample = "Full") %>%
+  bind_rows(Get_BalanceTable(OutcomeBalance$SL, UnAdj = "Adj", renameUnAdj = "X") %>% mutate(Sample = "SL")) %>%
+  bind_rows(Get_BalanceTable(OutcomeBalance$CL, UnAdj = "Adj", renameUnAdj = "X") %>% mutate(Sample = "CL")) %>%
+  mutate_if(is.numeric, ~round(., 2)) %>%
+  mutate(SRO.X = paste0(M.1.X, " (", SD.1.X, ")"),
+         No_SRO.X = paste0(M.0.X, " (", SD.0.X, ")"),
+         Covariate = factor(Covariate, levels = OutcomeVars)) %>%
+  select(Covariate, Sample, SRO.X, No_SRO.X, ASD.X = Diff.X) %>%
+  gather(Temp, Value, ends_with("X")) %>%
+  arrange(Covariate) %>%
+  mutate(Temp = str_replace(Temp, "X", as.character(Covariate)) %>% as_factor()) %>%
+  select(-Covariate) %>%
+  spread(Temp, Value) %>%
+  mutate(Sample = factor(Sample, levels = SampleFacOrder))
 
-## At the School Level
-# Equating
-SchoolBalanceObjects <- map(c("CL_1to1","CL_1to2"),
-                            ~bal.tab(formula = f.build("SRO",c(SchoolCovNames)), data = CompleteSamp16L2OnlywPS,
-                                     continuous = "std", binary = "std", s.d.denom = "all",
-                                     disp.v.ratio = TRUE, abs = TRUE,
-                                     weights = CompleteSamp16L2OnlywPS[[.x]], method = "matching"))
+#### Calculating Covariate Descriptives and Balance ####
+# Calculating standardized mean difference for each of the conditioning methods using cobalt
+CovBalanceObjects <- map(.x = c("CL_match","SL_match"),
+                      ~bal.tab(formula = f.build("SRO",c(StudentCovNames, SchoolCovNames)),
+        data = FinalSamp16wPS,
+        continuous = "std", binary = "std", s.d.denom = "pooled",
+        abs = TRUE, un = TRUE,
+        disp.means = TRUE, disp.sd = TRUE, disp.v.ratio = TRUE,
+        weights = FinalSamp16wPS[[.x]], method = "matching")) %>%
+  set_names(c("CL", "SL"))
 
-# Combining into one table
-SchoolBalAll <- map2_dfr(.x = SchoolBalanceObjects, .y = c("CL_1to1","CL_1to2"),
-                          ~Get_BalanceTable(.x, UnAdj = "Adj", replace01 = c("_No_SRO","_SRO"), ModName = .y)) %>%
-  bind_rows(balCompL2) %>%
-  rename(Method = Model)
+## Cleaning up table for presentation
+CovBalanceTablePrep <- map2(.x = CovBalanceObjects, .y = names(CovBalanceObjects),
+                        ~Get_BalanceTable(.x, UnAdj = "Adj", renameUnAdj = .y) %>%
+                          select(Covariate, starts_with("Diff"), starts_with("V.Ratio"))) %>%
+  reduce(left_join, by = "Covariate") %>%
+  left_join(Get_BalanceTable(CovBalanceObjects$SL, UnAdj = "Un", renameUnAdj = "Full") %>%
+              select(Covariate, starts_with("Diff"), starts_with("V.Ratio")), by = "Covariate") %>%
+  mutate(Covariate = recode(Covariate, !!!SchoolCovsRecode) %>%
+           recode(., !!!StudentCovsRecode) %>%
+           PrintableCovariatesShortcut())
 
+CovBalanceTable <- BaselineStudentDescripsTotal %>%
+  left_join(CovBalanceTablePrep %>% mutate_if(is.numeric, ~round(., 2)), by = "Covariate") %>%
+  select(Covariate, Total, SRO, No_SRO,Diff.Full, Diff.SL, Diff.CL,
+         V.Ratio.Full, V.Ratio.SL, V.Ratio.CL) %>%
+  mutate(Covariate = factor(Covariate, levels = c("SRO", StudentFacOrder, SchoolFacOrder)))
+  
+# ## Checking that unadjusted values were equivalent
+map_lgl(c("M.0.Un","SD.0.Un","M.1.Un","SD.1.Un","Diff.Un","V.Ratio.Un"),
+        ~identical(CovBalanceObjects$SL$Balance[[.x]], CovBalanceObjects$CL$Balance[[.x]]))   # identical
 
-## At the Student Level
-# Equating
-StudentBalanceObjects <- map(c("IC_1to1","IC_1to2","CL_1to1","CL_1to2"),
-                             ~bal.tab(formula = f.build("SRO",c(StudentCovNames,SchoolCovNames)), data = FinalSamp16wPS,
-                                      continuous = "std", binary = "std", s.d.denom = "all",
-                                      disp.v.ratio = TRUE, abs = TRUE,
-                                      weights = FinalSamp16wPS[[.x]], method = "matching")) %>%
-  set_names(c("IC_1to1","IC_1to2","CL_1to1","CL_1to2"))
-
-# Combining into one table
-StudentBalAll <- map2_dfr(.x = StudentBalanceObjects, .y = names(StudentBalanceObjects),
-                           ~Get_BalanceTable(.x, UnAdj = "Adj", replace01 = c("_No_SRO","_SRO"), ModName = .y)) %>%
-  bind_rows(balCompL1) %>%
-  rename(Method = Model)
-
+CovBalanceTableLong <- CovBalanceTablePrep %>%
+  select(Covariate, starts_with("Diff"), starts_with("V.Ratio")) %>%
+  gather(Temp, Value, -Covariate) %>%
+  mutate(Temp = str_replace(Temp, "Diff", "ASD") %>%
+           str_replace(., "V.Ratio", "VR")) %>%
+  separate(Temp, into = c("Measure", "Sample"), sep = "\\.") %>%
+  spread(Measure, Value)
 
 #### Number of Matches for each Method ####
-## Students
-StudentSampleSizes <- map_dfr(StudentBalanceObjects,
-                             ~tibble::rownames_to_column(.x[["Observations"]],"Observations"),.id = "Method") %>%
-  bind_rows(as.data.frame(balance.CompL1$Observations) %>% mutate(Method = "Original")) %>%
-  mutate(Total = Control + Treated)
-
-# StudentSampleSizes %>% filter(Observations == "Matched (Unweighted)")
-
-## Schools - only provides unweighted
-SchoolSampleSizes <- map_dfr(c("IC_1to1","IC_1to2","CL_1to1","CL_1to2"),
-                             ~FinalSamp16wPS[FinalSamp16wPS[[.x]] != 0, ] %>% group_by(SRO) %>%
-                               summarize(schools = length(unique(level2)),
-                                         Method = .x) %>%
-                               spread(SRO, schools)) %>%
-  rename(Control = `0`, Treated = `1`) %>%
-  bind_rows(as.data.frame(balance.CompL2$Observations) %>% mutate(Method = "Original")) %>%
-  mutate(Total = Control + Treated)
-
-
-## Combined for output table
-ComboSampleSizes <- StudentSampleSizes %>%
-  filter(Observations == "Matched (ESS)" | is.na(Observations)) %>%     # Could use (Unweighted) too
-  mutate_at(vars(Treated,Total),~round(.,1)) %>%   # Only need this if using (ESS)
-  inner_join(SchoolSampleSizes, by = "Method", suffix = c(".Stu",".Sch")) %>%
-  mutate(Control = paste0(Control.Stu, " (", Control.Sch,")"),
-         Treated = paste0(Treated.Stu, " (", Treated.Sch,")"),
-         Total = paste0(Total.Stu, " (", Total.Sch,")"))
-
+# Students
+StudentSampleSizes <- FinalSamp16wPS %>%
+  group_by(SRO) %>%
+  summarize(SL_match = sum(SL_match),
+            CL_match = sum(CL_match),
+            # SL_weight = sum(SL_weight != 0),
+            # CL_weight = sum(CL_weight != 0),
+            Full = n()) %>%
+  gather(Sample, Students, -SRO) %>%
+  mutate(SRO = as.character(SRO))
+# Schools
+SchoolSampleSize <- map_dfr(c("CL_match", "SL_match"),
+                            ~FinalSamp16wPS[FinalSamp16wPS[[.x]] != 0, ] %>%
+                              group_by(SRO) %>%
+                              summarize(Schools = length(unique(level2)),
+                                        Sample = .x)) %>%
+  mutate(SRO = as.character(SRO)) %>%
+  bind_rows(as.data.frame(table(CompleteSamp16L2OnlywPS$SRO)) %>%
+              mutate(Sample = "Full") %>% rename(SRO = Var1, Schools = Freq))
+# Combined Table
+SampleSizes <- left_join(StudentSampleSizes, SchoolSampleSize, by = c("SRO", "Sample")) %>%
+  mutate(Sample = str_remove(Sample, "_match"),     #str_replace(Sample, "SL_weight", "Subject") %>% str_replace(., "CL_weight", "Cluster"),
+         SRO = recode(SRO, `0` = "TNo", `1` = "SRO")) %>%
+  gather(Temp, Value, Students, Schools) %>%
+  group_by(Sample, Temp) %>%
+  mutate(Total = sum(Value),
+         Percent = round((Value / Total) * 100, 1),
+         Keep = paste0(Value, " (", Percent, ")")) %>% ungroup() %>%
+  unite(col = "SRO_Type", SRO, Temp) %>%
+  select(Sample, SRO_Type, Keep) %>%
+  spread(SRO_Type, Keep)
+# SampleSizes <- bind_rows(SampleSizes,  data.frame(SRO = "Total", as.list(colSums(SampleSizes[-1])))) # Adding a Total row
 
 #### Balance Summaries ####
-## Percent of variables under .1 threshold
-UnderThreshold <- StudentBalAll %>%
-  filter(!(Variable %in% c("distance"))) %>% # ExcludeCovs
-  group_by(Method) %>% summarize(Count = sum(Diff < .10),
-                                Variables = n()) %>%
-  mutate(Percent = round(Count / Variables*100, 1))
+UnderThresholdTable <- CovBalanceTableLong %>%
+  group_by(Sample) %>%
+  summarize(ASD_Count = sum(ASD < 0.10),
+            ASD_Percent = round((ASD_Count / nrow(CovBalanceTablePrep))*100, 1),
+            VR_Count = sum(VR < 2.0, na.rm = TRUE),
+            VR_Percent = round((VR_Count / sum(!is.na(CovBalanceTablePrep$V.Ratio.Full)))*100, 1)) %>%
+  ungroup() %>%
+  mutate(ASD = paste0(ASD_Count, " (", ASD_Percent, ")"),
+         VR = paste0(VR_Count, " (", VR_Percent, ")"))
 
-## Percent of continuous variables with variance ratios < 1.2
-# Note: bal.tab automatically reverses all ratios to be > 1
-VarRatio <- StudentBalAll %>%
-  filter(!(Variable %in% c("distance")) & !is.na(V.Ratio)) %>%
-  group_by(Method) %>% summarize(Count = sum(V.Ratio < 1.20), # A Cohen's d of .10 is equivalent ot an Odds Ratio of 1.20
-                                Variables = n()) %>%
-  mutate(Percent = round(Count / Variables*100, 1))
-
-## Model with best balance on the most variables
-MostBalanced <- StudentBalAll %>% filter(!(Variable %in% c("distance"))) %>%
-  group_by(Variable) %>%
-  filter(Diff == min(Diff)) %>%
-  group_by(Method) %>% summarize(Count = n()) %>%
-  mutate(Variables = sum(Count),
-         Percent = round(Count / Variables*100, 1))
-
-
-## Combining Under Threshold, Most Balanced, and number of matches
-# Need to report NumVarRatioVariables in table notes
-NumVarRatioVariables <- unique(VarRatio$Variables)
-UTMBVRSS <- left_join(UnderThreshold, MostBalanced, by = c("Method","Variables"), suffix=c(".UT",".MB")) %>%
-  left_join(VarRatio %>% select(-Variables), by = "Method") %>%
-  left_join(ComboSampleSizes %>% select(Method, Control, Treated, Total), by = "Method")
-  # select(Method = Model, Matched,`Num Variables` = Variables,
-  #        Count.UT, Percent.UT, Count.VR = Count, Percent.VR = Percent, Count.MB, Percent.MB)
-
+SSUTTable <- left_join(SampleSizes, UnderThresholdTable, by = "Sample") %>%
+  select(Sample, ends_with("Students"), ends_with("Schools"), ASD, VR) %>%
+  mutate(Sample = factor(Sample, levels = SampleFacOrder)) %>%
+  arrange(Sample)
+  
 
 ## Ordering variables based on largest difference in the original sample for plotting purposes
-BalVarOrder <- StudentBalAll %>% filter(Method == "Original") %>%
-  mutate(Variable = fct_reorder(as_factor(Variable), Diff , .desc=TRUE))
-BalVarOrder <- levels(BalVarOrder$Variable)
+CovBalVarOrder <- CovBalanceTable %>%
+  mutate(Covariate = fct_reorder(as_factor(Covariate), Diff.Full , .desc = FALSE))
+CovBalVarOrder <- levels(CovBalVarOrder$Covariate)
 
 
-## Balance Plot for all Models
-BalAllPlotGrey <- StudentBalAll %>% filter(!(Variable %in% c("distance"))) %>%
-  mutate(Variable = factor(Variable, levels = rev(BalVarOrder))) %>%
-  ggplot(aes(x = Variable, y = Diff, group = Method)) +
-  geom_hline(yintercept = .1, linetype = 1, color = "gray5") +
-  geom_point(aes(shape = Method, color = Method),size = 4 ,position = position_dodge(1)) +
+## Balance Plot for all Samples
+# Need to clean up covariate names
+CovBalAllPlot <- CovBalanceTableLong %>%
+  mutate(Covariate = factor(Covariate, levels = CovBalVarOrder),
+         Sample = factor(Sample, levels = SampleFacOrder)) %>%
+  ggplot(aes(x = Covariate, y = ASD, group = Sample)) +
+  geom_hline(yintercept = .1, linetype = 1, color = "black", size = 2) +
+  geom_hline(yintercept = .25, linetype = "dashed", color = "black", size = 2) +
+  geom_point(aes(shape = Sample, color = Sample), size = 5, position = position_dodge(1)) +
   ylab("Standardized Difference") + xlab("") +
-  scale_shape_manual(values=c(19,18,17,15,7)) + #,3
-  scale_color_grey() +
-  #scale_color_brewer(palette="Dark2") +
+  scale_shape_manual(values = c(19, 18, 17)) + # 15,7,3
+  # scale_color_brewer(palette = "Set2") +
+  scale_color_manual(values = rev(c("#e66101","#5e3c99","#4daf4a"))) +
   coord_flip() +
-  theme_bw(base_size = 20) +
+  theme_bw(base_size = 22) +
   theme(panel.grid.major = element_line(color = "gray87"),
         panel.grid.minor = element_line(color = "gray90"),
         panel.background = element_rect(fill = "white", color = "black"),
         axis.text.x = element_text(color = "black"),
         axis.text.y = element_text(color = "black"),
-        legend.justification=c(1,0),legend.position=c(.9,.1))
+        legend.justification = c(1, 0), legend.position = c(.9, .1))
 
-#### Student-Level Demographics from Original and Best fitting sample ####
-## Might move this to HLM script
+ggsave(CovBalAllPlot, file = "Covariate_Balance_Plot.png", width = 15, height = 21)
 
 
 #### Saving data, models, and balance results ####
-save(FinalSamp16wPS, CompleteSamp16L2OnlywPS,
-     StudentCovNames, SchoolCovNames, ExcludeCovs, OutcomeVars,
-     SchoolBalanceObjects, SchoolBalAll, StudentBalanceObjects, StudentBalAll,
-     ComboSampleSizes, VarRatio, UnderThreshold, MostBalanced, UTMBVRSS,
-     BalVarOrder, BalAllPlotGrey,
+save(StudentCovNames, StudentCovsRecode, StudentFacOrder,            # Covariate Names
+     SchoolCovNames, SchoolCovsRecode, SchoolFacOrder,
+     ExcludeCovs, OutcomeVars, OutcomeFacOrder, SampleFacOrder,     # Outcome names
+     FinalSamp16wPS, CompleteSamp16L2OnlywPS,
+     CovBalanceObjects, CovBalanceTablePrep, CovBalanceTable, CovBalanceTableLong,
+     OutcomeBalance, OutcomeBalanceTable,
+     SampleSizes, UnderThresholdTable, SSUTTable,
+     CovBalVarOrder, CovBalAllPlot,
      file = "Saved Applied Results/PSbalance.RData")
