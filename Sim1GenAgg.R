@@ -1,15 +1,17 @@
-################################################
-#                                              #
-#   Simulation 1 - Generate L2 Aggregations    #
-#                                              #
-################################################
+#######################################################################
+#                                                                     #
+#   Simulation 1 - Procedures for Simulating Aggregated Covariates    #
+#                                                                     #
+#######################################################################
 
+## Loading packages
 library(simstudy)
 library(tictoc)
 library(dplyr)
 library(tidyr)
 
 #### Converting logits to probabilities and vice versa ####
+# can use plogis() instead
 LogitToProb <- function(logit){
   odds <- exp(logit)
   prob <- odds / (1 + odds)
@@ -45,9 +47,9 @@ DGS <- matrix(-999, ncol = length(DGSnames) + ncol(DataGenConds), nrow = nrow(Da
 
 ## Variables consistent across all conditions
 marg <- -1.0986                  # marginal probability of treatment;intercept of -1.0986 produces a marginal probability of .25; LogitToProb(-1.0986)
-L1names <- paste0("x", 1:20)
-trueL2names <- paste(L1names[1:10], "c", sep = "_")
-obsL2names <- paste(trueL2names, "o", sep = "_")
+L1names <- paste0("x", 1:20)                             # names of L1 covariates
+trueL2names <- paste(L1names[1:10], "c", sep = "_")      # names of true L2 covariates
+obsL2names <- paste(trueL2names, "o", sep = "_")         # names of aggregated L2 covariates
 
 #### Starting Generation ####
 set.seed(48226) # Seed for reproducing results
@@ -122,11 +124,6 @@ for(con in 1:nrow(DataGenConds)){
       
       #### V3: Generate true L2, generate L1 from L2, then aggregate observed L2 plus random error ####
       
-      # ## Level 1 covariates - 10 continuous covariates from standard normal distribution with correlation of .2
-      # GenL1 <- genCorData(n = ntot, mu = rep(0,10), sigma = 1, rho = 0.2, corstr = "cs", 
-      #                    cnames = paste0("x",11:20), idname = "sid") %>%
-      #   mutate(rij = rnorm(n = ntot, mean = 0, sd = sqrt(sigma2)))              # random error for outcome model from standard normal distribution (i.e, $\mu$ = 0, $\sigma^2$ = 1)
-
       ## Level 2 covariates - continuous covariates from normal distribution with correlation of .2
       GenL2 <- genCorData(n = nclus, mu = rep(0,20), sigma = sqrt(tau00), rho = .2, corstr = "cs",
                          cnames = paste0(L1names, "_c"), idname = "cid") %>%    # trueL2names; Generate 20 L2 covariates to maintain correlation amongst all L1 instead of half being uncorrelated with the other
@@ -148,14 +145,9 @@ for(con in 1:nrow(DataGenConds)){
       
       #### V4: Generate true L2, generate L1 from L2, sample from L1 then aggregate observed L2 ####
       
-      # ## Level 1 covariates - 10 continuous covariates from standard normal distribution with correlation of .2
-      # GenL1 <- genCorData(n = ntot, mu = rep(0,10), sigma = 1, rho = 0.2, corstr = "cs", 
-      #                    cnames = paste0("x",11:20), idname = "sid") %>%
-      #   mutate(rij = rnorm(n = ntot, mean = 0, sd = sqrt(sigma2)))              # random L1 error for outcome model
-      
       ## Level 2 covariates - continuous covariates from standard normal distribution with correlation of .2
       GenL2 <- genCorData(n = nclus, mu = rep(0,20), sigma = sqrt(tau00), rho = .2, corstr = "cs",
-                         cnames = paste0(L1names, "_c"), idname = "cid") %>%    # trueL2names; Generate 20 L2 covariates to maintain correlation amongst all L1 instead of half being uncorrelated with the other
+                         cnames = paste0(L1names, "_c"), idname = "cid") %>%    # Generate 20 L2 covariates to maintain correlation amongst all L1 instead of half being uncorrelated with the other
         mutate(zuj = rlogis(n = nclus, location = 0, scale = 1),                # random error for PS model (probability of treatment) from logistic distribution with mean = 0  and variance of $\pi^2 / 3$
                uj = rnorm(nclus, mean = 0, sd = sqrt(tau00)))                   # random error for outcome model from normal distribution (i.e, $\mu$ = 0, $\tau_{00} depends on condition)
       
@@ -227,15 +219,15 @@ for(con in 1:nrow(DataGenConds)){
     DataGenRepStats[r,13] <- var(SampData$Yij)                                  # variance of the outcome
     DataGenRepStats[r,14] <- cov(SampData[,L1names]) %>% diag() %>% mean()              # mean variance of L1 covariates
     DataGenRepStats[r,15] <- cor(SampData[,L1names]) %>% .[lower.tri(.)] %>%    # mean correlation of L1 covariates
-      psych::fisherz() %>% mean() %>% psych::fisherz2r()
+      psych::fisherz() %>% mean()
     DataGenRepStats[r,16] <- cov(SampData[,trueL2names]) %>% diag() %>% mean()         # mean variance of true L2 covariates
     DataGenRepStats[r,17] <- cor(SampData[,trueL2names]) %>% .[lower.tri(.)] %>%       # mean correlation of true L2 covariates
-      psych::fisherz() %>% mean() %>% psych::fisherz2r()
+      psych::fisherz() %>% mean()
     DataGenRepStats[r,18] <- cov(SampData[,obsL2names]) %>% diag() %>% mean()           # mean variance of observed L2 covariates
     DataGenRepStats[r,19] <- cor(SampData[,obsL2names]) %>% .[lower.tri(.)] %>%         # mean correlation of observed L2 covariates
-      psych::fisherz() %>% mean() %>% psych::fisherz2r()
+      psych::fisherz() %>% mean()
     DataGenRepStats[r,20] <- purrr::map2_dbl(.x = trueL2names,.y = obsL2names,~cor(SampData[,.x],SampData[,.y])) %>% # correlation b/t true and observed L2 covariates
-      psych::fisherz() %>% mean() %>% psych::fisherz2r()
+      psych::fisherz() %>% mean()
     DataGenRepStats[r,21] <- mean(ICC1)                                   # mean ICC(1) of L1 X covariates
     DataGenRepStats[r,22] <- mean(ICC2)                                   # mean ICC(2) of L2 X covariates
     DataGenRepStats[r,23] <- ifelse(PS.mod$converged == TRUE, 1, 0)       # Did the PS model converge?
@@ -267,9 +259,8 @@ for(con in 1:nrow(DataGenConds)){
 colnames(DGS) <- colnames(DataGenStats)
 DGSbyCond <- data.frame(DGS, stringsAsFactors = FALSE) %>%
   filter(nsub != -999) %>%                                     # Quality control check; should have all 432 rows after filtering, indicating all conditions were completed
-  mutate_at(vars(one_of(DGSnames)), as.numeric)                # Converting from character to numeric
-# DGSbyCond %>% mutate_if(is.numeric,~round(.,2)) %>% View()
-
+  mutate_at(vars(one_of(DGSnames)), as.numeric) %>%            # Converting from character to numeric
+  mutate_at(vars(contains("_Cor")), ~psych::fisherz2r(.))      # Converting z scores back to correlations
 
 #### Extracting timing ####
 # Character vector

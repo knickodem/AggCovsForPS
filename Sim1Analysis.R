@@ -18,11 +18,7 @@ library(tidyr)
 
 
 #### Simulation Results ####
-# load("Sim1_10Reps.RData")
-load("Saved Sim1 Results/Sim1_ThousandRepswCnvg.RData") #~/Degree Progress/Prospectus and Dissertation/Dis Sim/
 load("Saved Sim1 Results/Sim1_ThousandRepsUpdate.RData")
-
-
 
 #### Creates QQ, fitted vs residual, and Cook's d ####
 ModelCheckPlots <- function(model, smooth_method = "loess", ...){
@@ -158,7 +154,7 @@ Corrfac <- c(`Level 1` = "L1_Cor", `True Level 2` = "True_L2_Cor", `Aggregated L
 TheTimes <- lm(as.formula(paste0("Time ~ ", paste(ConditionVars, collapse = " + "))),
                data = DataGenTLogDF)
 TimesAnova <- anova(TheTimes) # I don't actually use this
-TimesOmega <- sjstats::omega_sq(TheTimes, partial = TRUE, ci.lvl = .95) %>%
+TimesOmega <- sjstats::omega_sq(TheTimes, partial = TRUE) %>%
   mutate(Characteristic = "Run Time")
 
 #### In Sample Characteristics, then binding timing ####
@@ -170,18 +166,11 @@ TheAnovas <- map(Thelms,~anova(.x)) # I don't actually use this
 
 ## Effect size
 #Note: Albers & Lakens (2017, p.9) says its okay that there are negative numbers even if it is theoretically impossible
-TheOmegas <- map_dfr(Thelms, ~sjstats::omega_sq(.x, partial = TRUE, ci.lvl = .95), .id = "Characteristic") %>%
+TheOmegas <- map_dfr(Thelms, ~sjstats::omega_sq(.x, partial = TRUE), .id = "Characteristic") %>%
   bind_rows(TimesOmega) %>%
   mutate(term = factor(term, levels = ConditionVars),
          Factor = fct_recode(term, !!!ConditionRename)) %>%
   mutate_if(is.numeric, ~round(., 2))
-
-# Both packages give similar results (CIs aren't expected to be exactly the same given the random draws from the bootstrap)
-# Based on my hand calculations, both  appear to use the formulas from Albers & Lakens (2017, p. 35). Not sure about the bootstrapped CIs
-# partial = FALSE constrains lower bound to 0, but still gives odd CIs
-# In summary, I don't think the CIs can be trusted from either package despite giving similar ranges
-# sjstats::omega_sq(Thelms$Y_Variance, partial = TRUE, ci.lvl = .95, method = "quantile")
-# groupedstats::lm_effsize_ci(Thelms$Y_Variance, effsize = "omega",partial = TRUE, conf.level = 0.95,nboot = 1000, method = "quantile")
 
 ## Wide format; for final paper, bold values > .14, which are considered large
 # Table is exported at end of code
@@ -191,38 +180,12 @@ TheOmegas_Wide <- TheOmegas %>%
   select(Factor, one_of(DGSnameswCnvg),`Run Time`) %>%
   rename_all(~str_replace_all(., "_", " ") %>% str_replace_all("\\.", "-"))
 
-#### Omega Plot ####
-# Note: does not help organize and interpret information
-# # set.seed(3854)
-# OmegaPlot <- TheOmegas %>%
-#   mutate(Characteristic = str_replace_all(Characteristic,"_"," ") %>% str_replace_all("\\.","-"),
-#          Characteristic = as_factor(Characteristic),
-#          Factor = fct_rev(Factor)) %>%
-#   ggplot(aes(x = Factor, y = partial.omegasq)) + #, shape = Factor
-#   geom_hline(yintercept = c(.01, .06, .14), linetype = "solid", size = 1, color = "grey" ) +
-#   geom_point(size = 2) +
-#   # geom_jitter(width = .1, size = 4) +
-#   # geom_errorbar(aes(ymin = conf.low, ymax = conf.high)) +
-#   scale_y_continuous(name = expression(omega^2*italic(p)), breaks = seq(0, 1, .1)) + #, limits = c(-0.01,.51)
-#   # scale_color_grey() +
-#   # scale_shape_manual(values = c(16, 1, 8, 17, 2, 18, 4, 9)) +
-#   theme_classic(base_size = 16) +
-#   theme(legend.position = "none") +
-#   # theme(legend.title = element_blank(), axis.title.y = element_blank(), #, axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
-#   #       legend.justification=c(1,0), legend.position=c(1,.03)) +
-#   coord_flip() +
-#   facet_wrap(~Characteristic)
-# 
-# ggsave(OmegaPlot, file = "Omega2p.png", width = 12, height = 6)
-
 #### Model Checking ####
-
 ## QQ and FittedvResid plots for each characteristic
 Model_Check_Plots <- map(Thelms, ~ModelCheckPlots(.x, se = FALSE, color = "black", size = 1))
 
 ## vif for the models
 # outcome characteristic doesn't matter, so only really need to run this for one model since the factors are consistent across models
-# map_dfr(Thelms,function, .id = "Characteristic")
 VIFs <- car::vif(Thelms[[1]]) %>%
   as.data.frame() %>%
   tibble::rownames_to_column("Factor") %>%
@@ -235,9 +198,7 @@ VIFs <- car::vif(Thelms[[1]]) %>%
 #############################################
 #### RQ1: True and Obs L2 Corr by Method ####
 
-## TheOmegas shows that the True-Obs L2 Corr is associated with everything but nclusters
-# summary(Thelms$True.Obs_L2_Cor) # doesn't tell me much
-Arrange_Omegas(`True-Obs L2 Cor`)
+Arrange_Omegas(`True-Obs L2 Cor`) #everything but nclusters
 
 ## Box Plot
 TrueObsCorbyMethodError_BoxPlot <- DGSbyCondUpdate %>%
@@ -250,14 +211,15 @@ TrueObsCorbyMethodError_BoxPlot <- DGSbyCondUpdate %>%
 
 ## Descriptives
 # Note: Create tables only if needed to report specific values in text, but not needed for display
-# psych::describeBy(DGSbyCondUpdate$True.Obs_L2_Cor, list(DGSbyCondUpdate$method, DGSbyCondUpdate$aggvar), mat = TRUE, digits = 3) %>% View()
-
-
+psych::describeBy(DGSbyCondUpdate$True.Obs_L2_Cor, list(DGSbyCondUpdate$method, DGSbyCondUpdate$aggvar), mat = TRUE, digits = 3)
 
 #########################################################
 
 #########################################################
 #### RQ2: True and Obs L2 Corr by Contextual Factors ####
+
+psych::describeBy(DGSbyCondUpdate$True.Obs_L2_Cor, list(DGSbyCondUpdate$icc), mat = TRUE, digits = 3)
+psych::describeBy(DGSbyCondUpdate$True.Obs_L2_Cor, list(DGSbyCondUpdate$nsub), mat = TRUE, digits = 3)
 
 ## Loess plot including all manipulated factors except number of clusters
 # Note: doing a boxplot isn't helpful because each box would only summarize 4 data points
@@ -307,22 +269,6 @@ ICC2Table <- DGSbyCondUpdate %>%
   mutate_if(is.numeric, ~round(.,2)) %>%
   unite(col = "Range",Min, Max, sep = " - ") %>%
   select(ICC1 = icc, Subjects = nsub, Expected = Value, Median, Range)
-
-
-## X_ICC2
-# XICC2_LoessPlot <- DGSbyCond_Long %>%
-#   filter(str_detect(Characteristic, "X_ICC2")) %>%
-#   bind_rows(ExpectedICC2) %>%
-#   mutate(Clusters = as_factor(nclus),
-#          ICC = fct_recode(icc, !!!ICCfac),
-#          rename(Subjects = nsub)) %>%
-#   Plot_Shortcut(xv = "ICC", yv = "Value", gpv = "Clusters", linebox = "line") +
-#   scale_color_manual(values = c("#cccccc","#969696", "#636363", "#525252")) + # Grey scale:
-#   scale_y_continuous(name = "Mean ICC(2)") +
-#   xlab("ICC(1) Condition") +
-#   facet_grid(. ~ Subjects, labeller = label_both) +
-#   theme(strip.background = element_rect(colour = "black", fill = "white"),
-#         legend.justification = c(1, 0), legend.position = c(.95, .05))
 
 ## Y_ICC1
 YICC1_BoxPlot <- DGSbyCond_Long %>%
@@ -404,7 +350,8 @@ Arrange_Omegas(`True L2 Cor`)      # Methods, subjects and ICC                  
 Arrange_Omegas(`Obs L2 Cor`)       # Method, aggvar, interact w/ ICC and subjects    ; Expected to be lower than .2 given the introduction of error
 
 ## Descriptives
-psych::describeBy(DGSbyCondUpdate$L1_Cor, list(DGSbyCondUpdate$method), mat = TRUE, digits = 4) %>% View()  
+psych::describeBy(DGSbyCondUpdate$L1_Cor, list(DGSbyCondUpdate$method), mat = TRUE, digits = 2)
+psych::describeBy(DGSbyCondUpdate$True_L2_Cor, list(DGSbyCondUpdate$method), mat = TRUE, digits = 2)
 
 
 ## Prep
@@ -456,33 +403,6 @@ Arrange_Omegas(`Logit RMSE`) # Likewise
 Arrange_Omegas(`PS Bias`) # icc, then subjects and interactions
 Arrange_Omegas(`PS MAE`) # icc, aggvar, clusters, method in that order
 Arrange_Omegas(`PS RMSE`) # Clusters, aggvar, icc, method in that order
-
-#### True and Estimated PS ####
-## Descriptives of true and estimated PS
-# psych::describeBy(DGSbyCondUpdate$Obs_PS, list(round(DGSbyCondUpdate$Prop_Z1,3)), mat = TRUE, digits = 3) %>% View()
-# psych::describeBy(DGSbyCondUpdate$True_PS, list(round(DGSbyCondUpdate$Prop_Z1,3)), mat = TRUE, digits = 3) %>% View()
-# psych::describe(DGSbyCondUpdate$True_PS) #.30 - .38
-
-# TrueEstPSbyPropZ_Plot <- DGSbyCondUpdate %>%
-#   gather(Temp, Value, True_PS, Obs_PS) %>%
-#   mutate(PS = case_when(str_detect(Temp, "True") ~ "True",
-#                         str_detect(Temp, "Obs") ~ "Estimated")) %>%
-#   ggplot(aes(x = Prop_Z1, y = Value, color = PS)) +
-#   geom_point() +
-#   scale_y_continuous(name = "Propensity Score", limits = c(.29, .391), breaks = seq(.30,.38, .02)) +
-#   scale_x_continuous(name = "Proportion Treated", limits = c(.29, .38), breaks = seq(.30,.38, .02)) +
-#   scale_color_manual(values = c("#e66101","#5e3c99"), guide = FALSE) + # "#e66101","#fdb863","#5e3c99","#b2abd2"
-#   theme_bw(base_size = 20)
-# 
-# PSDistribution_432Plot <- Con432SampDat %>% 
-# mutate(z = factor(z)) %>%
-#   gather(Temp, Value, TruePS, PS) %>%
-#   mutate(PS = case_when(str_detect(Temp, "True") ~ "True",
-#                         TRUE ~ "Estimated")) %>%
-#   ggplot(aes(x = Value, group = z, fill = z)) +
-#   geom_density(alpha = .5) +
-#   theme_bw(base_size = 16) +
-#   facet_grid(. ~ PS)
 
 #### Convergence ####
 Arrange_Omegas(Convergence)
@@ -667,15 +587,7 @@ ggsave(Bias_BoxPlot, file = "Bias_BoxPlot.png", width = 12, height = 10)
 # MAE and RMSE
 ggsave(MAERMSE_BoxPlot, file = "MAERMSE_BoxPlot.png", width = 10, height = 8)
 
-
-
-
 ## Export Omega Table
-OmegaTable <- openxlsx::createWorkbook()
-openxlsx::addWorksheet(OmegaTable,sheetName = "Omegas")
-openxlsx::writeDataTable(OmegaTable, "Omegas", TheOmegas_Wide, rowNames = FALSE, colNames = TRUE,
-                         tableStyle = "none", withFilter = FALSE, keepNA = FALSE)
-openxlsx::saveWorkbook(OmegaTable, file = "Sim1_OmegaTable.xlsx", overwrite = TRUE)
+openxlsx::write.xlsx(TheSim2Omegas_Wide, file = "Sim1_OmegaTable.xlsx")
 
-# write.csv(DGSbyMethod, file = "SamplebyMethod.csv", row.names = FALSE)
 
